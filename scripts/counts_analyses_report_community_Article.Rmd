@@ -1,0 +1,3472 @@
+---
+title: "Metabolomics and Metatranscriptomic analyses of a synthetic cloud consortium."
+author: "Domitille Jarrige"
+date: '`r Sys.Date()`'
+output:
+  html_document:
+    self_contained: yes
+    code_download: true
+    fig_caption: yes
+    highlight: zenburn
+    theme: cerulean
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    code_folding: "hide"
+  pdf_document:
+    fig_caption: yes
+    highlight: zenburn
+    toc: yes
+    toc_depth: 3
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r settings, include=FALSE, echo=FALSE, eval=TRUE}
+options(width = 300)
+# options(encoding = 'UTF-8')
+knitr::opts_chunk$set(
+  fig.width = 9, fig.height = 9, 
+  #fig.path = 'C:/Users/Domitille/Seafile/projets/METACLOUD/mock_communities/figures/',
+  #fig.path = 'C:/Users/domit/Seafile/projets/METACLOUD/transcriptomics/mock_communities/figures/',
+  fig.path = "C:/Users/djarrige/Desktop/Domitille/projets/Anciens_projets/METACLOUD/figures",
+  fig.align = "center", 
+  size = "small", 
+  echo = TRUE, 
+  eval = TRUE, 
+  warning = FALSE, 
+  message = FALSE, 
+  results = TRUE, 
+  comment = "")
+
+options(scipen = 12) ## Max number of digits for non-scientific notation
+# knitr::asis_output("\\footnotesize")
+```
+
+```{r set_working_directory}
+#setwd("C:/Users/Domitille/Seafile/projets/METACLOUD/mock_communities/scripts")
+#setwd("C:/Users/domit/Seafile/projets/METACLOUD/transcriptomics/mock_communities/scripts")
+setwd("C:/Users/djarrige/Desktop/Domitille/projets/Anciens_projets/METACLOUD/scripts/")
+
+```
+
+# Libraries
+
+```{r libraries, echo=FALSE, eval=TRUE}
+
+
+if (!requireNamespace("devtools", quietly = TRUE))
+    install.packages(devtools)
+  library("devtools", character.only = TRUE)
+
+
+list_lib_ver <- list(c("stats"),  c("grid"), c("utils"), c("graphics"), 
+                     c("ggplot2", "3.4.3"), c("ggpubr", "0.6.0"),
+                     c("DESeq2", "1.40.2"), c("MTXmodel", "1.2.4"), 
+                     c("VennDiagram", "1.7.3"), c("vegan", "2.6-4"),
+                     c("tibble", "3.2.1"), c("scales", "1.3.0"),
+                     c("S4Vectors", "0.38.2"), c("rgl", "1.3.1"),
+                     c("pheatmap", "1.0.12"), c("knitr", "1.45"),
+                     c("ggh4x", "0.2.8"), c("FactoMineR", "2.10"),
+                     c("data.table", "1.15.2"), c("BiocManager", "1.30.22"),
+                     c("ClassDiscovery", "3.4.0"), c("compositions", "2.0-8"),
+                     c("cplm", "0.7-12"),
+                     c("tidyverse", "2.0.0"), c("rlang", "1.1.3")
+                     )
+
+for (lib in list_lib_ver){
+  if (!requireNamespace(lib[[1]], quietly = TRUE))
+      devtools::install_version(lib[[1]], lib[[2]])
+    library(lib[[1]], character.only = TRUE)
+}
+
+
+if (!require("MTXmodel", character.only = TRUE)) {
+    devtools:install_github('biobakery/MTX_model')
+}
+library("MTXmodel")
+
+
+# to include 3D plots in html report
+knitr::knit_hooks$set(webgl = hook_webgl)
+
+```
+
+
+# Variables
+
+```{r variables}
+vect_COG_category_long <- c("A" = "A: RNA processing and modification",
+                            "B" = "B: Chromatin Structure and dynamics",
+                            "C" = "C: Energy production and conversion",
+                            "D" = "D: Cell cycle control, cell division, chromosome partitioning",
+                            "E" = "E: Amino Acid transport and metabolism",
+                            "F" = "F: Nucleotide transport and metabolism",
+                            "G" = "G: Carbohydrate transport and metabolism",
+                            "H" = "H: Coenzyme transport and metabolism",
+                            "I" = "I: Lipid transport and metabolism",
+                            "J" = "J: Translation, ribosomal structure and biogenesis",
+                            "K" = "K: Transcription",
+                            "L" = "L: Replication, recombination and repair",
+                            "M" = "M: Cell wall/membrane/envelope biogenesis",
+                            "N" = "N: Cell motility",
+                            "O" = "O: Post-translational modification, protein turnover, chaperones",
+                            "P" = "P: Inorganic ion transport and metabolism",
+                            "Q" = "Q: Secondary metabolites biosynthesis, transport and catabolism",
+                            "T" = "T: Signal Transduction mechanisms",
+                            "U" = "U: Intracellular trafficking, secretion and vesicular transport",
+                            "V" = "V: Defense mechanisms",
+                            "W" = "W: Extracellular structures",
+                            "X" = "X: Mobilome: prophages, transposons",
+                            "Y" = "Y: Nuclear structure",
+                            "Z" = "Z: Cytoskeleton",
+                            "R" = "R: General functional prediction only",
+                            "S" = "S: Function unknown" #,
+                            # "-" = "-: Other"
+                            )
+
+
+COG_colours <- hue_pal()(length(vect_COG_category_long))
+names(COG_colours) <- vect_COG_category_long
+
+species_colours <- c("D.hungarica" = "#e66101", "P.graminis" = "#fdb863", 
+                     "P.syringae" = "#b2abd2", "R.enclensis" = "#5e3c99")
+```
+
+# Functions
+
+```{r functions}
+
+compute_deseq2_analysis = function(myData, sample_data, subset_var=FALSE, select=FALSE, 
+                                   contrast_col, ref, tested){
+  data <- myData
+  sample <- sample_data
+  if ((subset_var != FALSE) & (select != FALSE)){
+    sample %>% filter(!!as.name(subset_var) == select) -> sample
+  }
+  
+  sample[[contrast_col]] <- factor(sample[[contrast_col]])
+  data <- data[row.names(sample)]
+  
+  data_matrix <- round(as.matrix(data))
+  d = formula(paste("~", " ", contrast_col))
+  
+  dds <- DESeqDataSetFromMatrix(countData = data_matrix, 
+                                colData = sample,
+                                design = d)
+  dds <- estimateSizeFactors(dds)
+  dds <- DESeq(dds)
+  resultsNames(dds)
+  resDESeq <- results(dds, contrast = c(contrast_col, tested, ref),
+                      independentFiltering = TRUE, alpha=0.1)
+  
+  resDESeq <- resDESeq[order(resDESeq$padj),]
+  res <- data.frame(resDESeq)
+  res$gene = row.names(res)
+  res$condition = select
+  res$SAMPLE_COMPARISON = paste0(tested, "_VS_", ref) 
+  #res %>% filter(padj < 0.2 & abs(log2FoldChange) > 1) -> res
+  
+  return(res)
+}
+```
+
+# Experimental setup
+
+Comparison of an artificial microbial community gene expression under two cloud-like conditions: 
+
+ - **summer day (SD):** light, 250µM H2O2, 17°C 
+
+ - **winter night (WN):** dark, no added H2O2, 5°C
+
+
+![](../figures/experimental_setup.png)
+
+
+# Bioinformatic workflow and mapping overview
+
+The metatranscriptomics data was processed using a custom made Snakemake workflow.
+
+![](../figures/metagenomic_analyses_community5.drawio.png) 
+
+Two sequencing runs were performed by Genoscreen (Lille, France) as the first run produced relatively low quality reads. Both runs are added into a single dataset in our analyses.
+
+After quality control steps and read cleaning ([report](https://seafile.unistra.fr/f/61e1c9bd97f049a2a4f4/?dl=1)) remaining rRNA (not depleted prior to sequencing) were removed with sortmeRNA. As fungal rRNA were not depleted in our libraries, the vast majority of our reads correspond to *Dioszegia* *hungarica* rRNAs.
+
+Non ribosomal and ribosomal RNAs were then mapped separately on our reference genomes using STAR.
+
+For non rRNA reads: **\~90-95% of reads mapped in biological samples** ([summary](https://seafile.unistra.fr/f/d4f55d4b60344c64bb4a/). In blank samples, a larger fraction of reads are unmapped.
+
+Few reads are mapped on *P. graminis* PDD-13b-3 genome. It will be difficult to get significant results for this species.
+
+Lastly, for each gene of the community, read counts were obtained with featureCounts.'-M' and '--fraction' options were used to count multi-mapping reads fractionally (if a read maps on x features: each feature gets 1/x counts).
+
+
+# Analyses
+
+
+##### Load counts and annotation data
+
+```{r load_data}
+
+counts_table <- read.csv("../results/all_counts_community_artificial_no_rRNA.tsv", sep = "\t", row.names = "Geneid")
+
+metadata_table <- read.csv("../data/metadata.txt", sep = "\t", row.names = "name") # row.names = "sample"
+
+
+counts_table %>% rename("WN_TF_1" = "S_5C1", 
+                        "WN_TF_2" = "S_5C2", 
+                        "WN_TF_3" = "S_5C3",
+                        "WN_BLK" = "S_5BLK",
+                        "SD_TF_1" = "S_17C1", 
+                        "SD_TF_2" = "S_17C2", 
+                        "SD_TF_3" = "S_17C3",
+                        "SD_BLK" = "S_17BLK") -> counts_table
+
+annotation_table <- read.csv("../data/annotations_final_community_updated.tsv", sep="\t", row.names = "Geneid")
+annotation_all <- read.csv("../data/annotations_final_community_updated.tsv", sep="\t", row.names = "Geneid")
+annotation_table_long <- read.csv("../data/annotations_final_community_long.tsv", sep="\t", row.names = "Geneid")
+
+## added july 2024
+counts_table <- counts_table[intersect(rownames(counts_table), rownames(annotation_all)),]
+
+
+
+annotation_diohu <- read.csv("../data/dioszegia_kegg.tsv", sep="\t", row.names = "Geneid")
+annotation_psegr <- read.csv("../data/pseudomonas_graminis_kegg.tsv", sep="\t", row.names = "Geneid")
+annotation_psesy <- read.csv("../data/pseudomonas_syringae_kegg.tsv", sep="\t", row.names = "Geneid")
+annotation_rhoen <- read.csv("../data/rhodococcus_kegg.tsv", sep="\t", row.names = "Geneid")
+
+chem_data_metaT <- read.csv("../data/formaldehyde_evolution_transcriptomics.txt", sep="\t")
+chem_data_metaB <- read.csv("../data/formaldehyde_evolution_metabolomics.txt", sep="\t")
+
+## Data for figure
+
+annotation_table_fig <- readxl::read_excel("../data/Table_S3_DEGs_annotations.xlsx")
+rename(annotation_table_fig, "COG_category" = "COG category", 
+       "COG_category_long" = "COG category long",
+       "COG_process" = "COG process") -> annotation_table_fig
+
+metabolomics_df <- read.csv("../data/metabolomics.txt", sep="\t", row.names = 1)
+
+# keep a version of the metabolomics dataset with all time points
+metabolomics_df -> metabolomics_all_times_df
+metabolomics_all_times_df %>% t() %>% data.frame() -> metabolomics_all_times_df
+
+metabolomics_all_times_df %>% rename("WN_T0_1" = "S5C_T0_1", 
+                                     "WN_T0_2" = "S5C_T0_2", 
+                                     "WN_T0_3" = "S5C_T0_3",
+                                     "SD_T0_1" = "S17C_T0_1", 
+                                     "SD_T0_2" = "S17C_T0_2", 
+                                     "SD_T0_3" = "S17C_T0_3",
+                                     "WN_TF_1" = "S5C_TF_1", 
+                                     "WN_TF_2" = "S5C_TF_2", 
+                                     "WN_TF_3" = "S5C_TF_3",
+                                     "SD_TF_1" = "S17C_TF_1", 
+                                     "SD_TF_2" = "S17C_TF_2", 
+                                     "SD_TF_3" = "S17C_TF_3") -> metabolomics_all_times_df
+
+metabolomics_all_times_df <- metabolomics_all_times_df[,c("WN_T0_1", "WN_T0_2", "WN_T0_3", "SD_T0_1", "SD_T0_2", "SD_T0_3",
+                                                          "WN_TF_1", "WN_TF_2", "WN_TF_3", "SD_TF_1", "SD_TF_2", "SD_TF_3")]
+
+metadata_table_metaB_all_times <- read.csv("../data/metadata_metaB.txt", sep = "\t", row.names = "name") # row.names = "sample"
+
+# Keep final time points only, like for metatranscriptomics
+metabolomics_df  %>% t() %>% 
+  data.frame() %>% select(starts_with(c("S17C_TF_", "S5C_TF_"))) -> metabolomics_df
+
+
+metabolomics_df %>% rename("WN_TF_1" = "S5C_TF_1", 
+                           "WN_TF_2" = "S5C_TF_2", 
+                           "WN_TF_3" = "S5C_TF_3",
+                           "SD_TF_1" = "S17C_TF_1", 
+                           "SD_TF_2" = "S17C_TF_2", 
+                           "SD_TF_3" = "S17C_TF_3") -> metabolomics_df
+
+metabolomics_box_plot_df <- readxl::read_excel("../results/metabolomics_annotation_boxplot.xlsx")
+
+metabolomics_annotations <- readxl::read_excel("../results/Table_S2_Metabolites_identified.xlsx", n_max = 25)
+```
+
+##### Removal of blank samples
+
+```{r taking_out_blk}
+
+counts_table <- counts_table[,c("WN_TF_1", "WN_TF_2", "WN_TF_3", "SD_TF_1", "SD_TF_2", "SD_TF_3")]
+metadata_table <- metadata_table[c("WN_TF_1", "WN_TF_2", "WN_TF_3", "SD_TF_1", "SD_TF_2", "SD_TF_3"),]
+  
+```
+
+## Chemical properties of the samples {.tabset}
+
+### Formaldehyde evolution
+
+```{r chem_plots_formaldehyde}
+
+chem_data_metaT$experiment <- "metaT"
+chem_data_metaB$experiment <- "metaB"
+
+chem_data <- rbind(chem_data_metaT, chem_data_metaB)
+
+
+
+## Metatranscriptomics data
+
+chem_data[chem_data$color == "#89DDF8" & chem_data$experiment == "metaT",] -> tmp1
+group_by(tmp1, sampling_time) %>% summarise(formaldehyde_mean=mean(formaldehyde_ratio_to_initial), 
+                                            formaldehyde_sd=sd(formaldehyde_ratio_to_initial)) -> tmp1
+tmp1$color <- "#89DDF8"
+tmp1$condition <- "WN"
+tmp1$category <- "biotic_WN"
+tmp1$experiment <- "metaT"
+
+chem_data[chem_data$color == "#F8AD18" & chem_data$experiment == "metaT",] -> tmp2
+group_by(tmp2, sampling_time) %>% summarise(formaldehyde_mean=mean(formaldehyde_ratio_to_initial), 
+                                            formaldehyde_sd=sd(formaldehyde_ratio_to_initial)) -> tmp2
+tmp2$color <- "#F8AD18"
+tmp2$condition <- "SD"
+tmp2$category <- "biotic_SD"
+tmp2$experiment <- "metaT"
+
+chem_data[chem_data$color == "#A6C1CA" & chem_data$experiment == "metaT",] -> tmp3
+group_by(tmp3, sampling_time) %>% summarise(formaldehyde_mean=mean(formaldehyde_ratio_to_initial), 
+                                            formaldehyde_sd=sd(formaldehyde_ratio_to_initial)) -> tmp3
+tmp3$color <- "#A6C1CA"
+tmp3$condition <- "WN"
+tmp3$category <- "abiotic_WN"
+tmp3$experiment <- "metaT"
+
+chem_data[chem_data$color == "#C4B69B" & chem_data$experiment == "metaT",] -> tmp4
+group_by(tmp4, sampling_time) %>% summarise(formaldehyde_mean=mean(formaldehyde_ratio_to_initial), 
+                                            formaldehyde_sd=sd(formaldehyde_ratio_to_initial)) -> tmp4
+tmp4$color <- "#C4B69B"
+tmp4$condition <- "SD"
+tmp4$category <- "abiotic_SD"
+tmp4$experiment <- "metaT"
+
+## Metabolomics data
+
+chem_data[chem_data$color == "#89DDF8" & chem_data$experiment == "metaB",] -> tmp5
+group_by(tmp5, sampling_time) %>% summarise(formaldehyde_mean=mean(formaldehyde_ratio_to_initial), 
+                                            formaldehyde_sd=sd(formaldehyde_ratio_to_initial)) -> tmp5
+tmp5$color <- "#89DDF8"
+tmp5$condition <- "WN"
+tmp5$category <- "biotic_WN"
+tmp5$experiment <- "metaB"
+
+chem_data[chem_data$color == "#F8AD18" & chem_data$experiment == "metaB",] -> tmp6
+group_by(tmp6, sampling_time) %>% summarise(formaldehyde_mean=mean(formaldehyde_ratio_to_initial), 
+                                            formaldehyde_sd=sd(formaldehyde_ratio_to_initial)) -> tmp6
+tmp6$color <- "#F8AD18"
+tmp6$condition <- "SD"
+tmp6$category <- "biotic_SD"
+tmp6$experiment <- "metaB"
+
+chem_data[chem_data$color == "#A6C1CA" & chem_data$experiment == "metaB",] -> tmp7
+group_by(tmp7, sampling_time) %>% summarise(formaldehyde_mean=mean(formaldehyde_ratio_to_initial), 
+                                            formaldehyde_sd=sd(formaldehyde_ratio_to_initial)) -> tmp7
+tmp7$color <- "#A6C1CA"
+tmp7$condition <- "WN"
+tmp7$category <- "abiotic_WN"
+tmp7$experiment <- "metaB"
+
+chem_data[chem_data$color == "#C4B69B" & chem_data$experiment == "metaB",] -> tmp8
+group_by(tmp8, sampling_time) %>% summarise(formaldehyde_mean=mean(formaldehyde_ratio_to_initial), 
+                                            formaldehyde_sd=sd(formaldehyde_ratio_to_initial)) -> tmp8
+tmp8$color <- "#C4B69B"
+tmp8$condition <- "SD"
+tmp8$category <- "abiotic_SD"
+tmp8$experiment <- "metaB"
+
+
+## Merge data
+
+line_data <- rbind(tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp8)
+rm(tmp1, tmp2, tmp3, tmp4, tmp5, tmp6, tmp7, tmp8)
+
+
+## Test difference between biotic and abiotic
+
+
+kruskal_formaldehyde <- c("",
+                          try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 1 &
+                                                                     chem_data_metaB$color == "#F8AD18"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaB[(chem_data_metaB$sampling_time == 1 &
+                                                                     chem_data_metaB$color == "#C4B69B"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+                          try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 2 &
+                                                                     chem_data_metaB$color == "#F8AD18"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaB[(chem_data_metaB$sampling_time == 2 &
+                                                                     chem_data_metaB$color == "#C4B69B"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 3 &
+                                                                     chem_data_metaB$color == "#F8AD18"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaB[(chem_data_metaB$sampling_time == 3 &
+                                                                     chem_data_metaB$color == "#C4B69B"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          "",
+                          try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 1 &
+                                                                     chem_data_metaT$color == "#F8AD18"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaT[(chem_data_metaT$sampling_time == 1 &
+                                                                     chem_data_metaT$color == "#C4B69B"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+                          try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 2 &
+                                                                     chem_data_metaT$color == "#F8AD18"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaT[(chem_data_metaT$sampling_time == 2 &
+                                                                     chem_data_metaT$color == "#C4B69B"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 3 &
+                                                                     chem_data_metaT$color == "#F8AD18"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaT[(chem_data_metaT$sampling_time == 3 &
+                                                                     chem_data_metaT$color == "#C4B69B"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 5 &
+                                                                     chem_data_metaT$color == "#F8AD18"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaT[(chem_data_metaT$sampling_time == 5 &
+                                                                     chem_data_metaT$color == "#C4B69B"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          "",
+                          try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 1 &
+                                                                     chem_data_metaB$color == "#89DDF8"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaB[(chem_data_metaB$sampling_time == 1 &
+                                                                     chem_data_metaB$color == "#A6C1CA"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_WN", 3), rep("abiotic_WN", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+                          try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 2 &
+                                                                     chem_data_metaB$color == "#89DDF8"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaB[(chem_data_metaB$sampling_time == 2 &
+                                                                     chem_data_metaB$color == "#A6C1CA"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_WN", 3), rep("abiotic_WN", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 3 &
+                                                                     chem_data_metaB$color == "#89DDF8"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaB[(chem_data_metaB$sampling_time == 3 &
+                                                                     chem_data_metaB$color == "#A6C1CA"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_WN", 3), rep("abiotic_WN", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          "",
+                          try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 1 &
+                                                                     chem_data_metaT$color == "#89DDF8"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaT[(chem_data_metaT$sampling_time == 1 &
+                                                                     chem_data_metaT$color == "#A6C1CA"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_WN", 3), rep("abiotic_WN", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+                          try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 2 &
+                                                                     chem_data_metaT$color == "#89DDF8"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaT[(chem_data_metaT$sampling_time == 2 &
+                                                                     chem_data_metaT$color == "#A6C1CA"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_WN", 3), rep("abiotic_WN", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 3 &
+                                                                     chem_data_metaT$color == "#89DDF8"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaT[(chem_data_metaT$sampling_time == 3 &
+                                                                     chem_data_metaT$color == "#A6C1CA"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_WN", 3), rep("abiotic_WN", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 5 &
+                                                                     chem_data_metaT$color == "#89DDF8"),
+                                                                    "formaldehyde_ratio_to_initial"],
+                                                    chem_data_metaT[(chem_data_metaT$sampling_time == 5 &
+                                                                     chem_data_metaT$color == "#A6C1CA"),
+                                                                    "formaldehyde_ratio_to_initial"]),
+                                              g = c(rep("biotic_WN", 3), rep("abiotic_WN", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE)
+)
+
+## Test difference between time 0 an the other time points
+
+# kruskal_formaldehyde <- c("",
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 1 &
+#                                                             chem_data_metaB$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_SD_TF_1", 3), rep("biotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 2 &
+#                                                             chem_data_metaB$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_SD_TF_2", 3), rep("biotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 3 &
+#                                                             chem_data_metaB$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_SD_TF_3", 3), rep("biotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       "",
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 1 &
+#                                                             chem_data_metaT$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_SD_TF_1", 3), rep("biotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 2 &
+#                                                             chem_data_metaT$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_SD_TF_2", 3), rep("biotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 3 &
+#                                                             chem_data_metaT$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_SD_TF_3", 3), rep("biotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 5 &
+#                                                             chem_data_metaT$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#F8AD18"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_SD_5", 3), rep("biotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       "",
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 1 &
+#                                                             chem_data_metaB$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_WN_TF_1", 3), rep("biotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 2 &
+#                                                             chem_data_metaB$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_WN_TF_2", 3), rep("biotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 3 &
+#                                                             chem_data_metaB$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_WN_TF_3", 3), rep("biotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       "",
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 1 &
+#                                                             chem_data_metaT$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_WN_TF_1", 3), rep("biotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 2 &
+#                                                             chem_data_metaT$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_WN_TF_2", 3), rep("biotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 3 &
+#                                                             chem_data_metaT$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_WN_TF_3", 3), rep("biotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 5 &
+#                                                             chem_data_metaT$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#89DDF8"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("biotic_WN_5", 3), rep("biotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE)
+#                      )
+
+kruskal_df <- data.frame(time = rep(c(0, 1, 2, 3, 0, 1, 2, 3, 5), 2),
+                         height = rep(0, 18),
+                         experiment = rep(c(rep("metaB", 4), rep("metaT", 5)), 2),
+                         condition = c(rep("SD", 9), rep("WN", 9)),
+                         category = c(rep("community SD", 9), rep("community WN", 9)),
+                         color = c(rep("#F8AD18", 9), rep("#89DDF8", 9)),
+                         pvalue = kruskal_formaldehyde)
+
+
+
+# kruskal_formaldehyde_abio <- c("",
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 1 &
+#                                                             chem_data_metaB$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_TF_1", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 2 &
+#                                                             chem_data_metaB$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_TF_2", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 3 &
+#                                                             chem_data_metaB$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_TF_3", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       "",
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 1 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_TF_1", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 2 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_TF_2", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 3 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_TF_3", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 5 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_5", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       "",
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 1 &
+#                                                             chem_data_metaB$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_WN_TF_1", 3), rep("abiotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 2 &
+#                                                             chem_data_metaB$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_WN_TF_2", 3), rep("abiotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 3 &
+#                                                             chem_data_metaB$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_WN_TF_3", 3), rep("abiotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       "",
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 1 &
+#                                                             chem_data_metaT$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_WN_TF_1", 3), rep("abiotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 2 &
+#                                                             chem_data_metaT$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_WN_TF_2", 3), rep("abiotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 3 &
+#                                                             chem_data_metaT$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_WN_TF_3", 3), rep("abiotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 5 &
+#                                                             chem_data_metaT$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#A6C1CA"),
+#                                                            "formaldehyde_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_WN_5", 3), rep("abiotic_WN_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE)
+#                      )
+
+# kruskal_df_abio <- data.frame(time = rep(c(0, 1, 2, 3, 0, 1, 2, 3, 5), 2),
+#                          height = rep(1.15, 18),
+#                          experiment = rep(c(rep("metaB", 4), rep("metaT", 5)), 2),
+#                          condition = c(rep("SD", 9), rep("WN", 9)),
+#                          category = c(rep("abiotic SD", 9), rep("abiotic WN", 9)),
+#                          color = c(rep("#C4B69B", 9), rep("#A6C1CA", 9)),
+#                          pvalue = kruskal_formaldehyde_abio)
+
+
+#krusk <- rbind(kruskal_df, kruskal_df_abio)
+krusk <- kruskal_df
+
+
+## Segment data for sampling time
+
+segment_data <- data.frame(x = c(4, 0, 3.5), xend = c(4, 0, 3.5), 
+                           y = c(-Inf, -Inf, -Inf), yend = c(Inf, Inf, Inf),
+                           experiment = c("metaT", "metaB", "metaB"))
+  
+chem_data %>% ggplot() +
+  geom_point(aes(x=sampling_time, y=formaldehyde_ratio_to_initial, color=color)) +
+  ylim(c(-0.1, 1.2)) +
+  xlim(c(0, 5)) +
+  scale_colour_identity("category", labels = c("community WN", "abiotic WN",
+                                               "abiotic SD", "community SD"), 
+                        guide="legend") +
+  scale_fill_identity() +
+  ylab(label = "Relative formaldehyde evolution") +
+  xlab(label = "Incubation time (h)") +
+  # facet_grid(rows = vars(experiment), cols = vars(condition)) + #, nrow=2, ncol=2
+  facet_grid(rows = vars(condition), cols = vars(experiment),
+             labeller = as_labeller(c("metaT" = "Metatranscriptomics", 
+                                      "metaB" = "Meta-metabolomics",
+                                      "SD" = "SD",
+                                      "WN" = "WN"))) + 
+  theme(legend.position = "bottom",
+        panel.background = element_rect(fill="#f4f4f4")) +
+  
+  
+  geom_path(data = line_data[line_data$category == "biotic_SD",], 
+            aes(x = sampling_time, y = formaldehyde_mean, color = color), 
+            linewidth = 1) + 
+  geom_ribbon(data = line_data[line_data$category == "biotic_SD",], 
+              aes(x = sampling_time, 
+                  ymin = formaldehyde_mean - formaldehyde_sd,
+                  ymax = formaldehyde_mean + formaldehyde_sd,
+                  fill = color), alpha=0.25, linewidth=0.05) +
+  
+  geom_path(data = line_data[line_data$category == "abiotic_SD",], 
+            aes(x = sampling_time, y = formaldehyde_mean, color = color), 
+            linewidth = 1) + 
+  geom_ribbon(data = line_data[line_data$category == "abiotic_SD",], 
+              aes(x = sampling_time, 
+                  ymin = formaldehyde_mean - formaldehyde_sd,
+                  ymax = formaldehyde_mean + formaldehyde_sd,
+                  fill = color), alpha=0.25, linewidth=0.05) +
+  
+  geom_path(data = line_data[line_data$category == "biotic_WN",], 
+            aes(x = sampling_time, y = formaldehyde_mean, color = color), 
+            linewidth = 1) + 
+  geom_ribbon(data = line_data[line_data$category == "biotic_WN",], 
+              aes(x = sampling_time, 
+                  ymin = formaldehyde_mean - formaldehyde_sd,
+                  ymax = formaldehyde_mean + formaldehyde_sd,
+                  fill = color), alpha=0.25, linewidth=0.05) + 
+  
+  geom_path(data = line_data[line_data$category == "abiotic_WN",], 
+            aes(x = sampling_time, y = formaldehyde_mean, color = color), 
+            linewidth = 1) + 
+  geom_ribbon(data = line_data[line_data$category == "abiotic_WN",], 
+              aes(x = sampling_time, 
+                  ymin = formaldehyde_mean - formaldehyde_sd,
+                  ymax = formaldehyde_mean + formaldehyde_sd,
+                  fill = color), alpha=0.25, linewidth=0.05) + 
+  
+  # plot significance stars
+  geom_text(data=krusk[krusk$category == "community SD",], 
+            aes(x = time, y = height, label = pvalue, colour=color), 
+            size = 7, show.legend = FALSE, nudge_y = -0.07) +
+  geom_text(data=krusk[krusk$category == "community WN",], 
+            aes(x = time, y = height, label = pvalue, colour=color), 
+            size = 7, show.legend = FALSE, nudge_y = -0.07) +
+  geom_text(data=krusk[krusk$category == "abiotic SD",],
+            aes(x = time, y = height, label = pvalue, colour=color),
+            size = 7, show.legend = FALSE) +
+  geom_text(data=krusk[krusk$category == "abiotic WN",],
+            aes(x = time, y = height, label = pvalue, colour=color),
+            size = 7, show.legend = FALSE) +
+  
+  # geom_segment(aes(x=4, xend=4, y=-Inf, yend=Inf)) +
+  geom_segment(data=segment_data, aes(x = x, xend = xend, y = y, yend = yend)) +
+  geom_text(data=segment_data, aes(x = x + 0.2, y = 0.20, label = "cell sampling"), angle=90, size=3) -> plot
+
+print(plot)
+
+ggsave(plot = plot, filename = "../figures/formaldehyde_evolution.tiff", dpi = 300, width = 10, height = 6, bg="white")
+  
+```
+
+
+### H2O2 evolution
+
+```{r chem_plots_H2O2}
+
+chem_data_metaT$experiment <- "metaT"
+chem_data_metaB$experiment <- "metaB"
+
+chem_data <- rbind(chem_data_metaT, chem_data_metaB)
+
+
+
+## Metatranscriptomics data
+
+
+
+chem_data[chem_data$color == "#F8AD18" & chem_data$experiment == "metaT",] -> tmp2
+group_by(tmp2, sampling_time) %>% summarise(H2O2_mean=mean(H2O2_ratio_to_initial), 
+                                            H2O2_sd=sd(H2O2_ratio_to_initial)) -> tmp2
+tmp2$color <- "#F8AD18"
+tmp2$condition <- "SD"
+tmp2$category <- "biotic_SD"
+tmp2$experiment <- "metaT"
+
+
+chem_data[chem_data$color == "#C4B69B" & chem_data$experiment == "metaT",] -> tmp4
+group_by(tmp4, sampling_time) %>% summarise(H2O2_mean=mean(H2O2_ratio_to_initial), 
+                                            H2O2_sd=sd(H2O2_ratio_to_initial)) -> tmp4
+tmp4$color <- "#C4B69B"
+tmp4$condition <- "SD"
+tmp4$category <- "abiotic_SD"
+tmp4$experiment <- "metaT"
+
+## Metabolomics data
+
+
+chem_data[chem_data$color == "#F8AD18" & chem_data$experiment == "metaB",] -> tmp6
+group_by(tmp6, sampling_time) %>% summarise(H2O2_mean=mean(H2O2_ratio_to_initial), 
+                                            H2O2_sd=sd(H2O2_ratio_to_initial)) -> tmp6
+tmp6$color <- "#F8AD18"
+tmp6$condition <- "SD"
+tmp6$category <- "biotic_SD"
+tmp6$experiment <- "metaB"
+
+
+chem_data[chem_data$color == "#C4B69B" & chem_data$experiment == "metaB",] -> tmp8
+group_by(tmp8, sampling_time) %>% summarise(H2O2_mean=mean(H2O2_ratio_to_initial), 
+                                            H2O2_sd=sd(H2O2_ratio_to_initial)) -> tmp8
+tmp8$color <- "#C4B69B"
+tmp8$condition <- "SD"
+tmp8$category <- "abiotic_SD"
+tmp8$experiment <- "metaB"
+
+
+## Merge data
+
+line_data <- rbind(tmp2, tmp4, tmp6, tmp8)
+rm(tmp2, tmp4, tmp6, tmp8)
+
+## Test difference between time 0 an the other time points
+
+kruskal_h2o2 <-  c("",
+                          try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 1 &
+                                                                     chem_data_metaB$color == "#F8AD18"),
+                                                                    "H2O2_ratio_to_initial"],
+                                                    chem_data_metaB[(chem_data_metaB$sampling_time == 1 &
+                                                                     chem_data_metaB$color == "#C4B69B"),
+                                                                    "H2O2_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+                          try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 2 &
+                                                                     chem_data_metaB$color == "#F8AD18"),
+                                                                    "H2O2_ratio_to_initial"],
+                                                    chem_data_metaB[(chem_data_metaB$sampling_time == 2 &
+                                                                     chem_data_metaB$color == "#C4B69B"),
+                                                                    "H2O2_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 3 &
+                                                                     chem_data_metaB$color == "#F8AD18"),
+                                                                    "H2O2_ratio_to_initial"],
+                                                    chem_data_metaB[(chem_data_metaB$sampling_time == 3 &
+                                                                     chem_data_metaB$color == "#C4B69B"),
+                                                                    "H2O2_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          "",
+                          try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 1 &
+                                                                     chem_data_metaT$color == "#F8AD18"),
+                                                                    "H2O2_ratio_to_initial"],
+                                                    chem_data_metaT[(chem_data_metaT$sampling_time == 1 &
+                                                                     chem_data_metaT$color == "#C4B69B"),
+                                                                    "H2O2_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+                          try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 2 &
+                                                                     chem_data_metaT$color == "#F8AD18"),
+                                                                    "H2O2_ratio_to_initial"],
+                                                    chem_data_metaT[(chem_data_metaT$sampling_time == 2 &
+                                                                     chem_data_metaT$color == "#C4B69B"),
+                                                                    "H2O2_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 3 &
+                                                                     chem_data_metaT$color == "#F8AD18"),
+                                                                    "H2O2_ratio_to_initial"],
+                                                    chem_data_metaT[(chem_data_metaT$sampling_time == 3 &
+                                                                     chem_data_metaT$color == "#C4B69B"),
+                                                                    "H2O2_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+                          try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 5 &
+                                                                     chem_data_metaT$color == "#F8AD18"),
+                                                                    "H2O2_ratio_to_initial"],
+                                                    chem_data_metaT[(chem_data_metaT$sampling_time == 5 &
+                                                                     chem_data_metaT$color == "#C4B69B"),
+                                                                    "H2O2_ratio_to_initial"]),
+                                              g = c(rep("biotic_SD", 3), rep("abiotic_SD", 3))
+                          )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE)
+                     )
+
+kruskal_df <- data.frame(time = c(0, 1, 2, 3, 0, 1, 2, 3, 5),
+                         height = rep(0, 9),
+                         experiment = c(rep("metaB", 4), rep("metaT", 5)),
+                         condition = rep("SD", 9),
+                         category = rep("community SD", 9),
+                         color = rep("#F8AD18", 9),
+                         pvalue = kruskal_h2o2)
+
+# 
+# kruskal_h2o2_abio <- c("",
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 1 &
+#                                                             chem_data_metaB$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_TF_1", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 2 &
+#                                                             chem_data_metaB$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_TF_2", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaB[(chem_data_metaB$sampling_time == 3 &
+#                                                             chem_data_metaB$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"],
+#                                            chem_data_metaB[(chem_data_metaB$sampling_time == 0 &
+#                                                             chem_data_metaB$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_TF_3", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       "",
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 1 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_TF_1", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE) ,
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 2 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_TF_2", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 3 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_TF_3", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE),
+#                       try(if(kruskal.test(x = c(chem_data_metaT[(chem_data_metaT$sampling_time == 5 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"],
+#                                            chem_data_metaT[(chem_data_metaT$sampling_time == 0 &
+#                                                             chem_data_metaT$color == "#C4B69B"),
+#                                                            "H2O2_ratio_to_initial"]),
+#                                      g = c(rep("abiotic_SD_5", 3), rep("abiotic_SD_0", 3))
+#                       )[["p.value"]] < 0.05){"*"}else{""}, silent = TRUE)
+#                      )
+
+# kruskal_df_abio <- data.frame(time = c(0, 1, 2, 3, 0, 1, 2, 3, 5),
+#                          height = rep(1.15, 9),
+#                          experiment = c(rep("metaB", 4), rep("metaT", 5)),
+#                          condition = rep("SD", 9),
+#                          category = rep("abiotic SD", 9),
+#                          color = rep("#C4B69B", 9),
+#                          pvalue = kruskal_h2o2_abio)
+
+
+# krusk <- rbind(kruskal_df, kruskal_df_abio)
+krusk <- kruskal_df
+
+
+## Segment data for sampling time
+
+segment_data <- data.frame(x = c(4, 0, 3.5), xend = c(4, 0, 3.5), 
+                           y = c(-Inf, -Inf, -Inf), yend = c(Inf, Inf, Inf),
+                           experiment = c("metaT", "metaB", "metaB"))
+  
+chem_data[chem_data$condition == "SD",] %>% ggplot() +
+  geom_point(aes(x=sampling_time, y=H2O2_ratio_to_initial, color=color)) +
+  ylim(c(-0.1, 1.2)) +
+  xlim(c(0, 5)) +
+  scale_colour_identity("category", labels = c("abiotic SD", "community SD"), 
+                        guide="legend") +
+  scale_fill_identity() +
+  ylab(label = "Relative H2O2 evolution") +
+  xlab(label = "Incubation time (h)") +
+  # facet_grid(rows = vars(experiment), cols = vars(condition)) + #, nrow=2, ncol=2
+  facet_grid(rows = vars(condition), cols = vars(experiment),
+             labeller = as_labeller(c("metaT" = "Metatranscriptomics", 
+                                      "metaB" = "Meta-metabolomics",
+                                      "SD" = "SD",
+                                      "WN" = "WN"))) + 
+  theme(legend.position = "bottom",
+        panel.background = element_rect(fill="#f4f4f4")) +
+  
+  
+  geom_path(data = line_data[line_data$category == "biotic_SD",], 
+            aes(x = sampling_time,y =H2O2_mean, color = color), 
+            linewidth = 1) + 
+  geom_ribbon(data = line_data[line_data$category == "biotic_SD",], 
+              aes(x = sampling_time, 
+                  ymin = H2O2_mean - H2O2_sd,
+                  ymax = H2O2_mean + H2O2_sd,
+                  fill = color), alpha=0.25, linewidth=0.05) +
+  
+    geom_path(data = line_data[line_data$category == "abiotic_SD",], 
+            aes(x = sampling_time,y =H2O2_mean, color = color), 
+            linewidth = 1) + 
+  geom_ribbon(data = line_data[line_data$category == "abiotic_SD",], 
+              aes(x = sampling_time, 
+                  ymin = H2O2_mean - H2O2_sd,
+                  ymax = H2O2_mean + H2O2_sd,
+                  fill = color), alpha=0.25, linewidth=0.05) +
+  
+  # plot significance stars
+  geom_text(data=krusk[krusk$category == "community SD",], 
+            aes(x = time, y = height, label = pvalue, colour=color), 
+            size = 7, show.legend = FALSE, nudge_y = -0.07) +
+  geom_text(data=krusk[krusk$category == "abiotic SD",],
+            aes(x = time, y = height, label = pvalue, colour=color),
+            size = 7, show.legend = FALSE) +
+
+  
+  # geom_segment(aes(x=4, xend=4, y=-Inf, yend=Inf)) +
+  geom_segment(data=segment_data, aes(x = x, xend = xend, y = y, yend = yend)) +
+  geom_segment(aes(x = -Inf, xend = Inf, y = 0.2, yend = 0.2), colour = "darkred", linetype = 2) +
+  geom_text(data=segment_data, aes(x = x + 0.2, y = 0.42, label = "cell sampling"), angle=90, size=3) -> plot
+
+print(plot)
+
+ggsave(plot = plot, filename = "../figures/H2O2_evolution.tiff", dpi = 300, width = 10, height = 3.6, bg="white")
+  
+```
+
+
+
+
+## Descriptive statistics on complete community metatranscriptomics and metabolomics data
+
+### Metatranscriptomics
+
+#### Sample-wise statistics (raw metatranscriptomics counts)
+
+```{r sample-wise_stats}
+
+message("Computing sample-wise statistics on raw counts")
+sample_stat_prenorm <- data.frame(
+  mean = apply(counts_table, 2, mean, na.rm = TRUE),
+  sd = apply(counts_table, 2, sd, na.rm = TRUE),
+  iqr = apply(counts_table, 2, IQR, na.rm = TRUE),
+  Q1 = apply(counts_table, 2, quantile, p = 0.25, na.rm = TRUE),
+  median = apply(counts_table, 2, median, na.rm = TRUE),
+  Q3 = apply(counts_table, 2, quantile, p = 0.75, na.rm = TRUE),
+  max = apply(counts_table, 2, max, na.rm = TRUE),
+  null = apply(counts_table == 0, 2, sum, na.rm = TRUE)
+)
+
+kable(sample_stat_prenorm[0:6, ], caption = "Sample-wise statistics before normalisation")
+```
+
+#### Gene-wise statistics (raw metatranscriptomics counts)
+
+```{r gene-wise_stats}
+
+message("Computing gene-wise statistics on raw counts")
+gene_stat_prenorm <- data.frame(
+  mean = apply(counts_table, 1, mean, na.rm = TRUE),
+  sd = apply(counts_table, 1, sd, na.rm = TRUE),
+  iqr = apply(counts_table, 1, IQR, na.rm = TRUE),
+  Q1 = apply(counts_table, 1, quantile, p = 0.25, na.rm = TRUE),
+  median = apply(counts_table, 1, median, na.rm = TRUE),
+  Q3 = apply(counts_table, 1, quantile, p = 0.75, na.rm = TRUE),
+  max = apply(counts_table, 1, max, na.rm = TRUE),
+  null = apply(counts_table == 0, 1, sum, na.rm = TRUE)
+)
+
+#kable(gene_stat_prenorm[100:109, ], caption = "Gene-wise statistics before normalisation")
+```
+
+#### Zeroes filtering and smoothing inspired by MTXmodel article [(Zhang et al. 2021)](https://doi.org/10.1093/bioinformatics/btab327)
+
+```{r lists}
+species <- unlist(unique(annotation_table[,"Organism"]))
+samples <- row.names(metadata_table)
+```
+
+Gene with 0 counts in more than 70% of samples are deemed unexpressed and are removed from the dataset.  
+
+```{r MTX_zero_filtering, results='asis'}
+message("Filtering undetected genes")
+undetected_genes <- gene_stat_prenorm$null >= ncol(counts_table) * 0.70
+print(paste0("Undetected genes (null in >= 70% samples): ", sum(undetected_genes)))
+
+kept_genes <- !undetected_genes
+print(paste0("Kept genes: ", sum(kept_genes)))
+
+## Genes after filtering
+counts_filtered <- counts_table[kept_genes, ]
+annotation_table <- annotation_all[rownames(counts_filtered),] #row.names()
+
+## Species abundance (sum of all counts)
+totals_df <- data.frame()
+for (spe in species) {
+  spe_geneid <- annotation_table$Organism == spe
+  for (samp in samples) {
+    totals_df[spe, samp] <- sum(counts_filtered[spe_geneid, samp], na.rm=TRUE)
+  }
+}
+
+```
+
+```{r no_standardisation}
+#################### remove standardisation??? ############
+counts_standard <- counts_filtered
+table_gene_expr <- counts_table
+table_gene_expr$detected <- "No"
+table_gene_expr[kept_genes, "detected"] <- "yes"
+table_gene_expr <- rownames_to_column(table_gene_expr)
+table_gene_expr <- left_join(table_gene_expr, rownames_to_column(annotation_table_long)[,c("rowname", "locus_tag", "transcriptId")])
+# write_delim(table_gene_expr, file = "../results/table_of_kept_expressed_genes.tsv", delim = "\t", )
+```
+
+```{r zeroes_smoothing_metatranscriptomics}
+## remaining zeroes smoothing (as in Zhang et al. 2021)
+
+min_val <- apply(counts_standard, 1, function(x) (min(x[x>0])/2))
+
+
+for (gene in row.names(counts_standard)) {
+  counts_standard[gene,][counts_standard[gene,] == 0] <- min_val[gene]
+}
+
+```
+
+```{r sample_wise_stats_filtered}
+message("Computing sample-wise statistics on filtered counts")
+sample_stat_filt <- data.frame(
+  mean = apply(counts_standard, 2, mean, na.rm = TRUE),
+  sd = apply(counts_standard, 2, sd, na.rm = TRUE),
+  iqr = apply(counts_standard, 2, IQR, na.rm = TRUE),
+  Q1 = apply(counts_standard, 2, quantile, p = 0.25, na.rm = TRUE),
+  median = apply(counts_standard, 2, median, na.rm = TRUE),
+  Q3 = apply(counts_standard, 2, quantile, p = 0.75, na.rm = TRUE),
+  max = apply(counts_standard, 2, max, na.rm = TRUE),
+  null = apply(counts_standard == 0, 2, sum, na.rm = TRUE)
+)
+
+kable(sample_stat_filt[0:6, ], caption = "Sample-wise statistics after filtering")
+```
+
+#### CLR (Centered Log ratio) transformation of whole community metatranscriptomics counts
+
+```{r CLR_transformation}
+
+counts_clr <- counts_standard
+
+for (samp in samples) {
+  counts_clr[,samp] <- clr(counts_standard[,samp])
+}
+```
+
+```{r sample_wise_stats_clr}
+message("Computing sample-wise statistics on filtered counts")
+sample_stat_clr <- data.frame(
+  mean = apply(counts_clr, 2, mean, na.rm = TRUE),
+  sd = apply(counts_clr, 2, sd, na.rm = TRUE),
+  iqr = apply(counts_clr, 2, IQR, na.rm = TRUE),
+  Q1 = apply(counts_clr, 2, quantile, p = 0.25, na.rm = TRUE),
+  median = apply(counts_clr, 2, median, na.rm = TRUE),
+  Q3 = apply(counts_clr, 2, quantile, p = 0.75, na.rm = TRUE),
+  max = apply(counts_clr, 2, max, na.rm = TRUE),
+  null = apply(counts_clr == 0, 2, sum, na.rm = TRUE)
+)
+
+kable(sample_stat_clr[0:6, ], caption = "Sample-wise statistics after CLR transformation")
+```
+
+```{r gene_stats_norm}
+## Gene-wise statistics after normalisation
+message("Computing gene-wise statistics on log-transformed and normalised counts")
+gene_stat_norm <- data.frame(mean = apply(counts_clr, 1, mean, na.rm=TRUE),
+                             var = apply(counts_clr, 1, var, na.rm=TRUE),
+                             sd = apply(counts_clr, 1, sd, na.rm=TRUE),
+                             iqr = apply(counts_clr, 1, IQR, na.rm=TRUE),
+                             min = apply(counts_clr, 1, min, na.rm=TRUE),
+                             med = apply(counts_clr, 1, median, na.rm=TRUE),
+                             max = apply(counts_clr, 1, max, na.rm=TRUE))
+
+# Ajout du coefficient de variation
+gene_stat_norm$coef_var <- (gene_stat_norm$sd / gene_stat_norm$mean)
+
+
+```
+
+#### Metatranscriptomics counts distribution
+
+```{r hist_raw, fig.height=7, fig.width=7}
+par(mfrow=c(1,1))
+hist(unlist(counts_table),
+     breaks = 200,
+     cex.axis = 0.7,
+     las = 1,
+     col = "skyblue",
+     xlab = "raw counts",
+     main = "Distribution of raw counts")
+```
+
+```{r hist_clr, fig.height=7, fig.width=7}
+par(mfrow=c(1,1))
+hist(unlist(counts_clr),
+     breaks = 200,
+     cex.axis = 0.7,
+     las = 1,
+     col = "skyblue",
+     xlab = "clr-transformed counts",
+     main = "Distribution of clr-transformed counts")
+```
+
+The distribution of the whole community metatranscriptomics counts seems close to normal.
+
+```{r box_plot_raw, fig.height=7, fig.width=7}
+# Raw data
+boxplot(counts_table,
+        main = "Raw expression",
+        horizontal = TRUE,
+        col = metadata_table$color,
+        cex = 0.5,
+        cex.axis = 0.8,
+        las = 1)
+```
+
+```{r box_plot_clr, fig.height=7, fig.width=7}
+boxplot(counts_clr,
+        main = "clr-transformed expression",
+        horizontal = TRUE,
+        col = metadata_table$color,
+        cex = 0.5,
+        cex.axis = 0.8,
+        las = 1)
+```
+
+
+The CLR transformation centred our data.
+
+
+#### Community metatranscriptomics counts repartition by species
+
+```{r species_repartition_table}
+totals_df$species <- row.names((totals_df))
+totals_df %>%
+    pivot_longer(!species, 
+                names_to=c("sample"),
+                values_to="total_counts") %>%
+  mutate(sample = case_when(sample == "SD_TF_1" ~ "SD_TF_1",
+                            sample == "SD_TF_2" ~ "SD_TF_2",
+                            sample == "SD_TF_3" ~ "SD_TF_3",
+                            sample == "WN_TF_1" ~ "WN_TF_1",
+                            sample == "WN_TF_2" ~ "WN_TF_2",
+                            sample == "WN_TF_3" ~ "WN_TF_3")) -> totals_df
+```
+
+```{r species_repartition_plot, fig.height=7, fig.width=7}
+
+
+ggplot(data=totals_df, mapping=aes(x=sample, y=total_counts, fill=species)) + 
+  geom_bar(position="fill", stat="identity") + 
+  scale_fill_brewer(palette = "PuOr") +
+  labs(y = "Percentage of total counts") +
+  scale_y_continuous(labels = as_function(~ 100 * .)) + 
+  theme(axis.text.x = element_text(colour = c("SD_TF_1" = "darkorange",
+                                              "SD_TF_2" = "darkorange",
+                                              "SD_TF_3" = "darkorange",
+                                              "WN_TF_1" = "darkcyan",
+                                              "WN_TF_2" = "darkcyan",
+                                              "WN_TF_3" = "darkcyan"))) + 
+  ggtitle("Total metatranscriptomics counts per species") -> p 
+
+print(p)
+
+ggsave("../figures/Figure_S3_counts_repartition.png", p, dpi = 300)
+ggsave("../figures/Figure_S3_counts_repartition.tiff", p, height = 7, width = 7, dpi = 300)
+```
+
+As previously noted, *Dioszegia hungarica* counts are largely dominant in our data. *Pseudomonas graminis* associated counts are very rare.
+
+##### *D. hungarica* filtered counts repartition by nucleus or mitochondrial origin
+
+```{r dioszegia_genome_origin_transcripts, fig.height=7, fig.width=7}
+
+organelle_df <- data.frame()
+
+mito_geneid <- annotation_table$Chr == "Dioszegia_hungarica_PDD-24b-2_contig_35"
+nucl_geneid <- (annotation_table$Organism == "D.hungarica" & annotation_table$Chr != "Dioszegia_hungarica_PDD-24b-2_contig_35")
+
+for (samp in samples) {
+    organelle_df["mitochondria", samp] <- sum(counts_filtered[mito_geneid, samp], na.rm=TRUE)
+    organelle_df["nucleus", samp] <- sum(counts_filtered[nucl_geneid, samp], na.rm=TRUE)
+}
+
+organelle_df$organelle <- row.names((organelle_df))
+organelle_df %>%
+    pivot_longer(!organelle, 
+                names_to=c("sample"),
+                values_to="total_counts") %>%
+  mutate(sample = case_when(sample == "SD_TF_1" ~ "SD_TF_1",
+                            sample == "SD_TF_2" ~ "SD_TF_2",
+                            sample == "SD_TF_3" ~ "SD_TF_3",
+                            sample == "WN_TF_1" ~ "WN_TF_1",
+                            sample == "WN_TF_2" ~ "WN_TF_2",
+                            sample == "WN_TF_3" ~ "WN_TF_3")) -> organelle_df
+
+ggplot(data=organelle_df, mapping=aes(x=sample, y=total_counts, fill=organelle)) + 
+  geom_bar(position="fill", stat="identity") + 
+  scale_fill_brewer(palette = "PuOr") +
+  labs(y = "Percentage of total counts") +
+  scale_y_continuous(labels = as_function(~ 100 * .)) + 
+  theme(axis.text.x = element_text(colour = c("SD_TF_1" = "darkorange",
+                                              "SD_TF_2" = "darkorange",
+                                              "SD_TF_3" = "darkorange",
+                                              "WN_TF_1" = "darkcyan",
+                                              "WN_TF_2" = "darkcyan",
+                                              "WN_TF_3" = "darkcyan"))) + 
+  ggtitle("Total transcript counts per D. hungarica compartment") -> p 
+
+print(p)
+
+ggsave("../figures/Diohu_counts_repartition.png", p, dpi = 300)
+ggsave("../figures/Diohu_counts_repartition.tiff", p, height = 7, width = 7, dpi = 300)
+
+```
+
+
+**Among *Dioszegia hungarica* counts, a large portion come from transcripts produced in the mitochondria, especially in SD conditions.**
+
+
+### Metabolomics
+
+#### Metabolite-wise statistics (raw data)
+
+```{r metabolite-wise_stats}
+
+# message("Computing metabolite-wise statistics on raw counts")
+
+metabolite_stat_prenorm <- data.frame(
+  mean = apply(metabolomics_all_times_df, 1, mean, na.rm = TRUE),
+  sd = apply(metabolomics_all_times_df, 1, sd, na.rm = TRUE),
+  iqr = apply(metabolomics_all_times_df, 1, IQR, na.rm = TRUE),
+  Q1 = apply(metabolomics_all_times_df, 1, quantile, p = 0.25, na.rm = TRUE),
+  median = apply(metabolomics_all_times_df, 1, median, na.rm = TRUE),
+  Q3 = apply(metabolomics_all_times_df, 1, quantile, p = 0.75, na.rm = TRUE),
+  max = apply(metabolomics_all_times_df, 1, max, na.rm = TRUE),
+  null = apply(metabolomics_all_times_df == 0, 1, sum, na.rm = TRUE)
+)
+
+kable(metabolite_stat_prenorm[100:109, ], caption = "Gene-wise statistics before normalisation")
+```
+
+#### Zero filtering and smoothing metabolomics
+
+Metabolites with 0 counts in more than 70% of samples are deemed unexpressed and are removed from the dataset.  
+
+
+
+```{r Metabolomics_all_times_zero_filtering, results='asis'}
+
+message("Filtering undetected metabolites")
+undetected_metabolites <- metabolite_stat_prenorm$null >= ncol(metabolomics_all_times_df) * 0.70
+print(paste0("undetected_metabolites (null in >= 70% samples): ", sum(undetected_metabolites)))
+
+kept_metabolites <- !undetected_metabolites
+print(paste0("Kept metabolites: ", sum(kept_metabolites)))
+
+## metabolites after filtering
+metabolomics_all_times_filtered <- metabolomics_all_times_df[kept_metabolites, ]
+
+```
+
+
+```{r Metabolomics_all_times_zeroes_smoothing}
+## remaining zeroes smoothing (as in Zhang et al. 2021)
+
+min_val <- apply(metabolomics_all_times_filtered, 1, function(x) (min(x[x>0])/2))
+
+
+for (metabolite in row.names(metabolomics_all_times_filtered)) {
+  metabolomics_all_times_filtered[metabolite,][metabolomics_all_times_filtered[metabolite,] == 0] <- min_val[metabolite]
+}
+
+```
+
+#### CLR transformation metabolomics
+
+```{r metabolomics_all_times_CLR}
+metabolomics_all_times_clr <- metabolomics_all_times_filtered
+
+for (samp in names(metabolomics_all_times_filtered )){
+  metabolomics_all_times_clr[,samp] <- as.vector(clr(metabolomics_all_times_filtered[,samp]))
+}
+```
+
+
+
+#### Metabolomics data repartition
+
+```{r hist_metaB_raw, fig.height=7, fig.width=7}
+par(mfrow=c(1,1))
+hist(unlist(metabolomics_all_times_df),
+     breaks = 200,
+     cex.axis = 0.7,
+     las = 1,
+     col = "skyblue",
+     xlab = "raw metabolomics data",
+     main = "Distribution of raw metabolomics data")
+```
+
+
+
+```{r hist_metaB_all_times_clr, fig.height=7, fig.width=7}
+par(mfrow=c(1,1))
+hist(unlist(metabolomics_all_times_clr),
+     breaks = 200,
+     cex.axis = 0.7,
+     las = 1,
+     col = "skyblue",
+     xlab = "clr-transformed metabolomics data, all times",
+     main = "Distribution of clr-transformed metabolomics data, all times")
+```
+
+The distribution of metabolomics data is close to normal.
+
+
+```{r box_plot_metaB_raw, fig.height=7, fig.width=7}
+boxplot(metabolomics_all_times_df,
+        main = "metabolomics raw data",
+        horizontal = TRUE,
+        col = metadata_table_metaB_all_times$color,
+        cex = 0.5,
+        cex.axis = 0.8,
+        las = 1)
+```
+
+```{r box_plot_metaB_clr, fig.height=7, fig.width=7}
+boxplot(metabolomics_all_times_clr,
+        main = "metabolomics clr-transformed expression",
+        horizontal = TRUE,
+        col = metadata_table_metaB_all_times$color,
+        cex = 0.5,
+        cex.axis = 0.8,
+        las = 1)
+```
+
+
+The CLR transformation centred our data.
+
+
+
+## Exploratory statistical analyses of the whole community
+
+### Principal Component Analyses (PCA) metatranscriptomic
+
+```{r PCA_clr, fig.height=7, fig.width=7}
+par(mfrow = c(2,2))
+res_pca <- PCA(t(counts_clr), scale.unit = TRUE, graph = FALSE)
+```
+
+```{r PERMANOVA_community}
+counts_data <- t(counts_clr)
+metadata_tmp <- data.frame(metadata_table, stringsAsFactors = TRUE)
+permanova <- adonis2(formula = as.formula(paste0("counts_data~", "condition")), 
+                     data = metadata_tmp, method="euclidean", # method="bray", #otu_data~TIME
+                     permutations = 999, sqrt.dist = FALSE, add = FALSE, by = "terms")
+pv = permanova$`Pr(>F)`[1]
+# print(pv)
+
+rm(counts_data, metadata_tmp)
+```
+
+```{r PCA_2D_plots_community, fig.height=4, fig.width=9}
+
+pca_tmp <- rbind(res_pca$ind$coord,
+                 res_pca$ind.sup$coord) %>% data.frame() %>% 
+  rownames_to_column("sample")
+
+
+pca_data <- left_join(pca_tmp, rownames_to_column(metadata_table), by=join_by("sample" == "rowname"))
+rm(pca_tmp)
+
+D1_text = paste0("Dim 1 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[1], digits=2), 
+                 "%)")
+D2_text = paste0("Dim 2 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[2], digits=2), 
+                 "%)")
+D3_text = paste0("Dim 3 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[3], digits=2), 
+                 "%)")
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.1, y=Dim.2, colour=color, ), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.2, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D1_text) + 
+  ylab(D2_text) +
+  ggtitle("PCA metatranscriptomics") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p1
+ 
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.1, y=Dim.3, colour=color), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.3, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D1_text) + 
+  ylab(D3_text) +
+  ggtitle("PCA metatranscriptomics") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p2
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.2, y=Dim.3, colour=color), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.2, y=Dim.3, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D2_text) + 
+  ylab(D3_text) +
+  ggtitle("PCA metatranscriptomics") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p3
+
+plotgrid_PCA <- ggarrange(p1, p2, p3, labels = c("A", "B", "C"), common.legend=TRUE, legend="bottom", nrow=1) 
+
+print(plotgrid_PCA)
+
+ggsave(plot = plotgrid_PCA, filename = "../figures/PCA_metatranscriptomics_3_composantes.tiff", dpi = 300, width = 15, height = 5, bg="white")
+
+ggsave(plot=p1, filename = "../figures/PCA_metatranscriptomics.tiff", dpi = 300, width = 6, height = 5, bg="white")
+```
+
+
+```{r 3D_PCA_clr, webgl=TRUE, fig.height=7, fig.width=7, message=FALSE, eval=TRUE}
+
+row_coord <- res_pca$ind$coord
+
+invisible(rgl::open3d())
+
+#rgl::bg3d("lightgray")
+rgl::plot3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1], 
+            y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2], 
+            z=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 3],
+            xlab = paste0(colnames(row_coord)[1] , " (" , substr(as.character(res_pca$eig[,2][1]), 1, 5) , "%)"),
+            ylab = paste0(colnames(row_coord)[2] , " (" , substr(as.character(res_pca$eig[,2][2]), 1, 5) , "%)"),
+            zlab = paste0(colnames(row_coord)[3] , " (" , substr(as.character(res_pca$eig[,2][3]), 1, 5) , "%)"),
+            xlim = c(min(row_coord[, 1]-10), max(row_coord[, 1])+10), 
+            ylim = c(min(row_coord[, 2]-10), max(row_coord[, 2])+10), 
+            zlim = c(min(row_coord[, 3]-10), max(row_coord[, 3])+10),
+            col = "darkcyan",
+            size=10,
+            main = "PCA community")
+
+rgl::text3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1]+5, 
+            y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2]+5, 
+            z=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 3]+5,
+            text=c("WN_TF_1", "WN_TF_2", "WN_TF_3"),
+            col = "darkcyan",
+            size=10)
+
+
+rgl::points3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1], 
+              y=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 2], 
+              z=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 3],
+              col = "darkorange",
+              size=10)
+
+rgl::text3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1]+5, 
+            y=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 2]+5, 
+            z=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 3]+5,
+            text=c("SD_TF_1", "SD_TF_2", "SD_TF_3"),
+            col = "darkorange",
+            size=10)
+
+# Activate for or gif generation
+par3d(windowRect = c(20, 30, 800, 800))
+
+# rgl::movie3d(
+#  movie="3dAnimated_PCA_metaT_community",
+#  spin3d( axis = c(0, 0, 1), rpm = 3),
+#  duration = 20,
+#  dir = "../figures",
+#  type = "gif",
+#  clean = TRUE, webshot=FALSE, fps=20)
+```
+
+### PCA metabolomics
+
+```{r PCA_clr_all_times, fig.height=7, fig.width=7}
+par(mfrow = c(2,2))
+res_pca_metaB_all_times <- PCA(t(metabolomics_all_times_clr), scale.unit = TRUE, graph = FALSE)
+
+```
+
+
+```{r PERMANOVA_community_metaB_all_times}
+
+metabolomics_data <- t(metabolomics_all_times_clr)
+metabolomics_tmp <- data.frame(metadata_table_metaB_all_times, stringsAsFactors = TRUE)
+permanova <- adonis2(formula = as.formula(paste0("metabolomics_data~", "condition")),
+                     data = metabolomics_tmp, method="euclidean", 
+                     permutations = 999, sqrt.dist = FALSE, add = FALSE, by = "terms")
+pv = permanova$`Pr(>F)`[1]
+# print(pv)
+
+rm(metabolomics_data, metabolomics_tmp)
+```
+
+
+```{r PCA_2D_plots_community_metabolomics_bis, fig.height=4, fig.width=9}
+
+pca_tmp_metaB <- rbind(res_pca_metaB_all_times$ind$coord,
+                 res_pca_metaB_all_times$ind.sup$coord) %>% data.frame() %>% 
+  rownames_to_column("sample")
+
+
+pca_data_metaB <- left_join(pca_tmp_metaB, rownames_to_column(metadata_table_metaB_all_times), by=join_by("sample" == "rowname"))
+rm(pca_tmp_metaB)
+
+D1_text = paste0("Dim 1 (", 
+                 round(data.frame(res_pca_metaB_all_times$eig)$percentage.of.variance[1], digits=2), 
+                 "%)")
+D2_text = paste0("Dim 2 (", 
+                 round(data.frame(res_pca_metaB_all_times$eig)$percentage.of.variance[2], digits=2), 
+                 "%)")
+D3_text = paste0("Dim 3 (", 
+                 round(data.frame(res_pca_metaB_all_times$eig)$percentage.of.variance[3], digits=2), 
+                 "%)")
+
+ggplot(pca_data_metaB) +
+  geom_point(aes(x=Dim.1, y=Dim.2, colour=color, ), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.2, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D1_text) + 
+  ylab(D2_text) +
+  ggtitle("PCA meta-mebolomics") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p1_metaB
+ 
+
+ggplot(pca_data_metaB) +
+  geom_point(aes(x=Dim.1, y=Dim.3, colour=color), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.3, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D1_text) + 
+  ylab(D3_text) +
+  ggtitle("PCA meta-mebolomics") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p2_metaB
+
+ggplot(pca_data_metaB) +
+  geom_point(aes(x=Dim.2, y=Dim.3, colour=color), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.2, y=Dim.3, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D2_text) + 
+  ylab(D3_text) +
+  ggtitle("PCA meta-mebolomics") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p3_metaB
+
+plotgrid_PCA_metaB <- ggarrange(p1_metaB, p2_metaB, p3_metaB, labels = c("A", "B", "C"), common.legend=TRUE, legend="bottom", nrow=1) 
+
+print(plotgrid_PCA_metaB)
+
+ggsave(plot = p1_metaB, filename = "../figures/PCA_metabolomics_all_times.tiff", dpi = 300, width = 5, height = 5, bg="white")
+
+ggsave(plot = plotgrid_PCA_metaB, filename = "../figures/PCA_metabolomics_3_composantes_all_times.tiff", dpi = 300, width = 15, height = 5, bg="white")
+
+ggsave(plot=p1_metaB, filename = "../figures/PCA_metabolomics_all_times.tiff", dpi = 300, width = 6, height = 5, bg="white")
+```
+
+```{r 3D_PCA_metaB_clr_all_timepoints, webgl=TRUE, fig.height=7, fig.width=7, message=FALSE}
+
+row_coord <- res_pca_metaB_all_times$ind$coord
+
+invisible(rgl::open3d())
+
+#rgl::bg3d("lightgray")
+rgl::plot3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1], 
+            y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2], 
+            z=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 3],
+            xlab = paste0(colnames(row_coord)[1] , " (" , substr(as.character(res_pca$eig[,2][1]), 1, 5) , "%)"),
+            ylab = paste0(colnames(row_coord)[2] , " (" , substr(as.character(res_pca$eig[,2][2]), 1, 5) , "%)"),
+            zlab = paste0(colnames(row_coord)[3] , " (" , substr(as.character(res_pca$eig[,2][3]), 1, 5) , "%)"),
+            xlim = c(min(row_coord[, 1]-10), max(row_coord[, 1])+10), 
+            ylim = c(min(row_coord[, 2]-10), max(row_coord[, 2])+10), 
+            zlim = c(min(row_coord[, 3]-10), max(row_coord[, 3])+10),
+            col = "darkcyan",
+            size=10,
+            main = "PCA meta-metabolomics community")
+
+rgl::text3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1]+5, 
+            y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2]+5, 
+            z=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 3]+5,
+            text=c("WN_TF_1", "WN_TF_2", "WN_TF_3"),
+            col = "darkcyan",
+            size=10)
+
+
+rgl::points3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1], 
+              y=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 2], 
+              z=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 3],
+              col = "darkorange",
+              size=10)
+
+rgl::text3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1]+5, 
+            y=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 2]+5, 
+            z=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 3]+5,
+            text=c("SD_TF_1", "SD_TF_2", "SD_TF_3"),
+            col = "darkorange",
+            size=10)
+
+
+rgl::points3d(x=row_coord[c("WN_T0_1", "WN_T0_2", "WN_T0_3"), 1], 
+              y=row_coord[c("WN_T0_1", "WN_T0_2", "WN_T0_3"), 2], 
+              z=row_coord[c("WN_T0_1", "WN_T0_2", "WN_T0_3"), 3],
+              col = "darkcyan",
+              size=10)
+
+rgl::text3d(x=row_coord[c("WN_T0_1", "WN_T0_2", "WN_T0_3"), 1]+5, 
+            y=row_coord[c("WN_T0_1", "WN_T0_2", "WN_T0_3"), 2]+5, 
+            z=row_coord[c("WN_T0_1", "WN_T0_2", "WN_T0_3"), 3]+5,
+            text=c("WN_T0_1", "WN_T0_2", "WN_T0_3"),
+            col = "darkcyan",
+            size=10)
+
+
+rgl::points3d(x=row_coord[c("SD_T0_1", "SD_T0_2", "SD_T0_3"), 1], 
+              y=row_coord[c("SD_T0_1", "SD_T0_2", "SD_T0_3"), 2], 
+              z=row_coord[c("SD_T0_1", "SD_T0_2", "SD_T0_3"), 3],
+              col = "darkorange",
+              size=10)
+
+rgl::text3d(x=row_coord[c("SD_T0_1", "SD_T0_2", "SD_T0_3"), 1]+5, 
+            y=row_coord[c("SD_T0_1", "SD_T0_2", "SD_T0_3"), 2]+5, 
+            z=row_coord[c("SD_T0_1", "SD_T0_2", "SD_T0_3"), 3]+5,
+            text=c("SD_T0_1", "SD_T0_2", "SD_T0_3"),
+            col = "darkorange",
+            size=10)
+
+
+
+# Activate for or gif generation
+# par3d(windowRect = c(20, 30, 800, 800))
+# 
+# rgl::movie3d(
+#  movie="3dAnimated_PCA_metaB_community",
+#  spin3d( axis = c(0, 0, 1), rpm = 3),
+#  duration = 20,
+#  dir = "../figures",
+#  type = "gif",
+#  clean = TRUE, webshot=FALSE, fps=20)
+```
+
+
+## Individual exploratory analysis of metatranscriptomics data by species
+
+#### Data preparation
+
+#### Load data by species
+
+```{r recover_species_data}
+
+diohu_geneid <- annotation_table$Organism == "D.hungarica"
+diohu_df <- counts_standard[startsWith(rownames_to_column(counts_standard)$rowname, "D.hungarica"),]
+
+psesy_geneid <- annotation_table$Organism == "P.syringae"
+psesy_df <- counts_standard[startsWith(rownames_to_column(counts_standard)$rowname, "P.syringae"),]
+
+psegr_geneid <- annotation_table$Organism == "P.graminis"
+psegr_df <- counts_standard[startsWith(rownames_to_column(counts_standard)$rowname, "P.graminis"),]
+
+rhoen_geneid <- annotation_table$Organism == "R.enclensis"
+rhoen_df <- counts_standard[startsWith(rownames_to_column(counts_standard)$rowname, "R.enclensis"),]
+
+```
+
+#### Zeroes smoothing by species
+
+```{r zeroes_smoothing_spe_data}
+
+## remaining zeroes smoothing (as in Zhang et al. 2021)
+min_val <- apply(diohu_df, 1, function(x) (min(x[x>0])/2))
+for (gene in row.names(diohu_df)) {
+  diohu_df[gene,][diohu_df[gene,] == 0] <- min_val[gene]
+}
+
+min_val <- apply(psesy_df, 1, function(x) (min(x[x>0])/2))
+for (gene in row.names(psesy_df)) {
+  psesy_df[gene,][psesy_df[gene,] == 0] <- min_val[gene]
+}
+
+min_val <- apply(psegr_df, 1, function(x) (min(x[x>0])/2))
+for (gene in row.names(psegr_df)) {
+  psegr_df[gene,][psegr_df[gene,] == 0] <- min_val[gene]
+}
+
+min_val <- apply(rhoen_df, 1, function(x) (min(x[x>0])/2))
+for (gene in row.names(rhoen_df)) {
+  rhoen_df[gene,][rhoen_df[gene,] == 0] <- min_val[gene]
+}
+```
+
+#### CLR Transformation of counts by species 
+
+```{r clr_transformation_of_spe_data}
+diohu_clr <- diohu_df
+psesy_clr <- psesy_df
+psegr_clr <- psegr_df
+rhoen_clr <- rhoen_df
+
+for (samp in samples) {
+    diohu_clr[,samp] <- as.vector(clr(diohu_df[,samp]))
+    psesy_clr[,samp] <- as.vector(clr(psesy_df[,samp]))
+    psegr_clr[,samp] <- as.vector(clr(psegr_df[,samp]))
+    rhoen_clr[,samp] <- as.vector(clr(rhoen_df[,samp]))
+}
+
+```
+
+
+### Transcriptomics counts histograms by species {.tabset}
+
+#### *Dioszegia hungarica*
+
+```{r hist_clr_diohu, fig.height=7, fig.width=7}
+par(mfrow=c(1,1))
+hist(unlist(diohu_clr),
+     breaks = 200,
+     cex.axis = 0.7,
+     las = 1,
+     col = "skyblue",
+     ylim = c(0,1800),
+     xlim = c(-5,15),
+     xlab = "clr-transformed counts",
+     main = "Distribution of D. hungarica clr-transformed counts")
+```
+
+#### *Pseudomonas graminis*
+
+```{r hist_clr_psegr, fig.height=7, fig.width=7}
+par(mfrow=c(1,1))
+hist(unlist(psegr_clr),
+     breaks = 200,
+     cex.axis = 0.7,
+     las = 1,
+     col = "skyblue",
+     ylim = c(0,1800),
+     xlim = c(-5,15),
+     xlab = "clr-transformed counts",
+     main = "Distribution of P. graminis clr-transformed counts")
+```
+
+Very few *P. graminis* counts, probably not exploitable.
+
+#### *Pseudomonas syringae*
+
+```{r hist_clr_psesy, fig.height=7, fig.width=7}
+par(mfrow=c(1,1))
+hist(unlist(psesy_clr),
+     breaks = 200,
+     cex.axis = 0.7,
+     las = 1,
+     col = "skyblue",
+     ylim = c(0,1800),
+     xlim = c(-5,15),
+     xlab = "clr-transformed counts",
+     main = "Distribution of P. syringae clr-transformed counts")
+```
+
+#### *Rhodococcus enclensis*
+
+```{r hist_clr_rhoen, fig.height=7, fig.width=7}
+par(mfrow=c(1,1))
+hist(unlist(rhoen_clr),
+     breaks = 200,
+     cex.axis = 0.7,
+     las = 1,
+     col = "skyblue",
+     ylim = c(0,1800),
+     xlim = c(-5,15),
+     xlab = "clr-transformed counts",
+     main = "Distribution of R. enclensis clr-transformed counts")
+```
+
+### Transcriptomics counts box-plots by species {.tabset}
+
+#### *Dioszegia hungarica*
+
+```{r box_plot_clr_diohu, fig.height=7, fig.width=7}
+boxplot(diohu_clr,
+        main = "D. hungarica clr-transformed expression",
+        horizontal = TRUE,
+        col = metadata_table$color,
+        cex = 0.5,
+        cex.axis = 0.8,
+        las = 1)
+
+```
+
+#### *Pseudomonas graminis*
+
+```{r box_plot_clr_psegr, fig.height=7, fig.width=7}
+boxplot(psegr_clr,
+        main = "P. graminis clr-transformed expression",
+        horizontal = TRUE,
+        col = metadata_table$color,
+        cex = 0.5,
+        cex.axis = 0.8,
+        las = 1)
+
+```
+
+#### *Pseudomonas syringae*
+
+```{r box_plot_clr_psesy, fig.height=7, fig.width=7}
+boxplot(psesy_clr,
+        main = "P. syringae clr-transformed expression",
+        horizontal = TRUE,
+        col = metadata_table$color,
+        cex = 0.5,
+        cex.axis = 0.8,
+        las = 1)
+
+```
+
+#### *Rhodococcus enclensis*
+
+```{r box_plot_clr_rhoen, fig.height=7, fig.width=7}
+boxplot(rhoen_clr,
+        main = "R. enclensis clr-transformed expression",
+        horizontal = TRUE,
+        col = metadata_table$color,
+        cex = 0.5,
+        cex.axis = 0.8,
+        las = 1)
+
+```
+
+### Transcriptomics counts PCA by species {.tabset}
+
+#### *Dioszegia hungarica*
+
+```{r PCA_clr_diohu}
+
+res_pca <- PCA(t(diohu_clr), scale.unit = TRUE, graph = FALSE)
+
+#fviz_pca_ind(res_pca,
+#             col.ind = metadata_table$color,
+#             mean.point = FALSE,
+#             title = "PCA on D. hungarica clr-transformed counts")
+```
+
+```{r PERMANOVA_diohu}
+counts_data <- t(diohu_clr)
+metadata_tmp <- data.frame(metadata_table, stringsAsFactors = TRUE)
+permanova <- adonis2(formula = as.formula(paste0("counts_data~", "condition")), 
+                     data = metadata_tmp, method="euclidean", # method="bray", #otu_data~TIME
+                     permutations = 999, sqrt.dist = FALSE, add = FALSE, by = "terms")
+pv = permanova$`Pr(>F)`[1]
+# print(pv)
+
+rm(counts_data, metadata_tmp)
+```
+
+```{r PCA_2D_plots_diohu, fig.height=4, fig.width=9}
+
+pca_tmp <- rbind(res_pca$ind$coord,
+                 res_pca$ind.sup$coord) %>% data.frame() %>% 
+  rownames_to_column("sample")
+
+
+pca_data <- left_join(pca_tmp, rownames_to_column(metadata_table), by=join_by("sample" == "rowname"))
+rm(pca_tmp)
+
+D1_text = paste0("Dim 1 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[1], digits=2), 
+                 "%)")
+D2_text = paste0("Dim 2 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[2], digits=2), 
+                 "%)")
+D3_text = paste0("Dim 3 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[3], digits=2), 
+                 "%)")
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.1, y=Dim.2, colour=color, ), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.2, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D1_text) + 
+  ylab(D2_text) +
+  ggtitle("PCA metatranscriptomics  \nD. hungarica") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p1
+ 
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.1, y=Dim.3, colour=color), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.3, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D1_text) + 
+  ylab(D3_text) +
+  ggtitle("PCA metatranscriptomics  \nD. hungarica") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p2
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.2, y=Dim.3, colour=color), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.2, y=Dim.3, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D2_text) + 
+  ylab(D3_text) +
+  ggtitle("PCA metatranscriptomics  \nD. hungarica") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p3
+
+plotgrid_PCA <- ggarrange(p1, p2, p3, labels = c("A", "B", "C"), common.legend=TRUE, legend="bottom", nrow=1) 
+
+print(plotgrid_PCA)
+
+ggsave(plot = plotgrid_PCA, filename = "../figures/PCA_metatranscriptomics_3_composantes_diohu.tiff", dpi = 300, width = 15, height = 5, bg="white")
+
+ggsave(plot=p1, filename = "../figures/PCA_metatranscriptomics_diohu.tiff", dpi = 300, width = 6, height = 5, bg="white")
+```
+
+```{r 3D_PCA_clr_diohu, webgl=TRUE, message=FALSE, warning=FALSE, fig.height=7, fig.width=7}
+
+row_coord <- res_pca$ind$coord
+
+
+invisible(rgl::open3d())
+
+#rgl::bg3d("lightgray")
+rgl::plot3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1], 
+            y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2], 
+            z=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 3],
+            xlab = paste0(colnames(row_coord)[1] , " (" , substr(as.character(res_pca$eig[,2][1]), 1, 5) , "%)"),
+            ylab = paste0(colnames(row_coord)[2] , " (" , substr(as.character(res_pca$eig[,2][2]), 1, 5) , "%)"),
+            zlab = paste0(colnames(row_coord)[3] , " (" , substr(as.character(res_pca$eig[,2][3]), 1, 5) , "%)"),
+            xlim = c(min(row_coord[, 1]), max(row_coord[, 1])+10), 
+            ylim = c(min(row_coord[, 2]), max(row_coord[, 2])+10), 
+            zlim = c(min(row_coord[, 3]), max(row_coord[, 3])+10),
+            col = "darkcyan",
+            size=10,
+            main = "PCA D. hungarica")
+
+rgl::text3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1]+5, 
+            y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2]+5, 
+            z=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 3]+5,
+            text=c("WN_TF_1", "WN_TF_2", "WN_TF_3"),
+            col = "darkcyan",
+            size=10)
+
+
+rgl::points3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1], 
+              y=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 2], 
+              z=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 3],
+              col = "darkorange",
+              size=10)
+
+rgl::text3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1]+5, 
+            y=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 2]+5, 
+            z=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 3]+5,
+            text=c("SD_TF_1", "SD_TF_2", "SD_TF_3"),
+            col = "darkorange",
+            size=10)
+
+## Activate for or gif generation
+#par3d(windowRect = c(20, 30, 800, 800))
+
+#rgl::movie3d(
+#  movie="3DAnimated_PCA_diohu", 
+#  spin3d( axis = c(0, 0, 1), rpm = 3),
+#  duration = 20, 
+#  dir = "../figures",
+#  type = "gif", 
+#  clean = TRUE, webshot=FALSE, fps=10)
+```
+
+#### *Pseudomonas graminis*
+
+```{r PCA_clr_psegr}
+
+res_pca <- PCA(t(psegr_clr), scale.unit = TRUE, graph = FALSE)
+
+```
+
+```{r PERMANOVA_psegr}
+counts_data <- t(psegr_clr)
+metadata_tmp <- data.frame(metadata_table, stringsAsFactors = TRUE)
+permanova <- adonis2(formula = as.formula(paste0("counts_data~", "condition")), 
+                     data = metadata_tmp, method="euclidean", # method="bray", #otu_data~TIME
+                     permutations = 999, sqrt.dist = FALSE, add = FALSE, by = "terms")
+pv = permanova$`Pr(>F)`[1]
+# print(pv)
+
+rm(counts_data, metadata_tmp)
+```
+
+```{r PCA_2D_plots_psegr, fig.height=4, fig.width=9}
+
+pca_tmp <- rbind(res_pca$ind$coord,
+                 res_pca$ind.sup$coord) %>% data.frame() %>% 
+  rownames_to_column("sample")
+
+
+pca_data <- left_join(pca_tmp, rownames_to_column(metadata_table), by=join_by("sample" == "rowname"))
+rm(pca_tmp)
+
+D1_text = paste0("Dim 1 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[1], digits=2), 
+                 "%)")
+D2_text = paste0("Dim 2 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[2], digits=2), 
+                 "%)")
+D3_text = paste0("Dim 3 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[3], digits=2), 
+                 "%)")
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.1, y=Dim.2, colour=color, ), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.2, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D1_text) + 
+  ylab(D2_text) +
+  ggtitle("PCA metatranscriptomics  \nP. graminis") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p1
+ 
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.1, y=Dim.3, colour=color), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.3, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D1_text) + 
+  ylab(D3_text) +
+  ggtitle("PCA metatranscriptomics  \nP. graminis") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p2
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.2, y=Dim.3, colour=color), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.2, y=Dim.3, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D2_text) + 
+  ylab(D3_text) +
+  ggtitle("PCA metatranscriptomics  \nP. graminis") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p3
+
+plotgrid_PCA <- ggarrange(p1, p2, p3, labels = c("A", "B", "C"), common.legend=TRUE, legend="bottom", nrow=1) 
+
+print(plotgrid_PCA)
+
+ggsave(plot = plotgrid_PCA, filename = "../figures/PCA_metatranscriptomics_3_composantes_psegr.tiff", dpi = 300, width = 15, height = 5, bg="white")
+
+ggsave(plot=p1, filename = "../figures/PCA_metatranscriptomics_psegr.tiff", dpi = 300, width = 6, height = 5, bg="white")
+```
+
+```{r 3D_PCA_clr_psegr, webgl=TRUE, message=FALSE, warning=FALSE, fig.height=7, fig.width=7}
+
+row_coord <- res_pca$ind$coord
+
+invisible(rgl::open3d())
+
+#rgl::bg3d("lightgray")
+rgl::plot3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1], 
+            y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2], 
+            z=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 3],
+            xlab = paste0(colnames(row_coord)[1] , " (" , substr(as.character(res_pca$eig[,2][1]), 1, 5) , "%)"),
+            ylab = paste0(colnames(row_coord)[2] , " (" , substr(as.character(res_pca$eig[,2][2]), 1, 5) , "%)"),
+            zlab = paste0(colnames(row_coord)[3] , " (" , substr(as.character(res_pca$eig[,2][3]), 1, 5) , "%)"),
+            xlim = c(min(row_coord[, 1]), max(row_coord[, 1])+10), 
+            ylim = c(min(row_coord[, 2]), max(row_coord[, 2])+10), 
+            zlim = c(min(row_coord[, 3]), max(row_coord[, 3])+10),
+            col = "darkcyan",
+            size=10,
+            main = "PCA P. graminis")
+
+rgl::text3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1]+5, 
+            y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2]+5, 
+            z=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 3]+5,
+            text=c("WN_TF_1", "WN_TF_2", "WN_TF_3"),
+            col = "darkcyan",
+            size=10)
+
+
+rgl::points3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1], 
+              y=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 2], 
+              z=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 3],
+              col = "darkorange",
+              size=10)
+
+rgl::text3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1]+3, 
+            y=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 2]+3, 
+            z=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 3]+3,
+            text=c("SD_TF_1", "SD_TF_2", "SD_TF_3"),
+            col = "darkorange",
+            size=10)
+
+## Activate for or gif generation
+#par3d(windowRect = c(20, 30, 800, 800))
+
+#rgl::movie3d(
+#  movie="3DAnimated_PCA_psegr", 
+#  spin3d( axis = c(0, 0, 1), rpm = 3),
+#  duration = 20, 
+#  dir = "../figures",
+#  type = "gif", 
+#  clean = TRUE, webshot=FALSE, fps=10)
+```
+
+#### *Pseudomonas syringae*
+
+```{r PCA_clr_psesy}
+
+res_pca <- PCA(t(psesy_clr), scale.unit = TRUE, graph = FALSE)
+```
+
+```{r PERMANOVA_psesy}
+counts_data <- t(psesy_clr)
+metadata_tmp <- data.frame(metadata_table, stringsAsFactors = TRUE)
+permanova <- adonis2(formula = as.formula(paste0("counts_data~", "condition")), 
+                     data = metadata_tmp, method="euclidean", # method="bray", #otu_data~TIME
+                     permutations = 999, sqrt.dist = FALSE, add = FALSE, by = "terms")
+pv = permanova$`Pr(>F)`[1]
+# print(pv)
+
+rm(counts_data, metadata_tmp)
+```
+
+```{r PCA_2D_plots_psesy, fig.height=4, fig.width=9}
+
+pca_tmp <- rbind(res_pca$ind$coord,
+                 res_pca$ind.sup$coord) %>% data.frame() %>% 
+  rownames_to_column("sample")
+
+
+pca_data <- left_join(pca_tmp, rownames_to_column(metadata_table), by=join_by("sample" == "rowname"))
+rm(pca_tmp)
+
+D1_text = paste0("Dim 1 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[1], digits=2), 
+                 "%)")
+D2_text = paste0("Dim 2 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[2], digits=2), 
+                 "%)")
+D3_text = paste0("Dim 3 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[3], digits=2), 
+                 "%)")
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.1, y=Dim.2, colour=color, ), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.2, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D1_text) + 
+  ylab(D2_text) +
+  ggtitle("PCA metatranscriptomics  \nP. syringae") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p1
+ 
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.1, y=Dim.3, colour=color), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.3, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D1_text) + 
+  ylab(D3_text) +
+  ggtitle("PCA metatranscriptomics  \nP. syringae") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p2
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.2, y=Dim.3, colour=color), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.2, y=Dim.3, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D2_text) + 
+  ylab(D3_text) +
+  ggtitle("PCA metatranscriptomics  \nP. syringae") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p3
+
+plotgrid_PCA <- ggarrange(p1, p2, p3, labels = c("A", "B", "C"), common.legend=TRUE, legend="bottom", nrow=1) 
+
+print(plotgrid_PCA)
+
+ggsave(plot = plotgrid_PCA, filename = "../figures/PCA_metatranscriptomics_3_composantes_psesy.tiff", dpi = 300, width = 15, height = 5, bg="white")
+
+ggsave(plot=p1, filename = "../figures/PCA_metatranscriptomics_psesy.tiff", dpi = 300, width = 6, height = 5, bg="white")
+```
+
+```{r 3D_PCA_clr_psesy, webgl=TRUE, message=FALSE, warning=FALSE, fig.height=7, fig.width=7}
+
+row_coord <- res_pca$ind$coord
+
+invisible(rgl::open3d())
+
+#rgl::bg3d("lightgray")
+rgl::plot3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1], 
+            y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2], 
+            z=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 3],
+            xlab = paste0(colnames(row_coord)[1] , " (" , substr(as.character(res_pca$eig[,2][1]), 1, 5) , "%)"),
+            ylab = paste0(colnames(row_coord)[2] , " (" , substr(as.character(res_pca$eig[,2][2]), 1, 5) , "%)"),
+            zlab = paste0(colnames(row_coord)[3] , " (" , substr(as.character(res_pca$eig[,2][3]), 1, 5) , "%)"),
+            xlim = c(min(row_coord[, 1]), max(row_coord[, 1])+10), 
+            ylim = c(min(row_coord[, 2]), max(row_coord[, 2])+10), 
+            zlim = c(min(row_coord[, 3]), max(row_coord[, 3])+10),
+            col = "darkcyan",
+            size=10,
+            main = "PCA P. syringae")
+
+rgl::text3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1]+3, 
+            y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2]+3, 
+            z=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 3]+3,
+            text=c("WN_TF_1", "WN_TF_2", "WN_TF_3"),
+            col = "darkcyan",
+            size=10)
+
+
+rgl::points3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1], 
+              y=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 2], 
+              z=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 3],
+              col = "darkorange",
+              size=10)
+
+rgl::text3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1]+3, 
+            y=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 2]+3, 
+            z=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 3]+3,
+            text=c("SD_TF_1", "SD_TF_2", "SD_TF_3"),
+            col = "darkorange",
+            size=10)
+
+
+## Activate for or gif generation
+#par3d(windowRect = c(20, 30, 800, 800))
+
+#rgl::movie3d(
+#  movie="3DAnimated_PCA_psesy", 
+#  spin3d( axis = c(0, 0, 1), rpm = 3),
+#  duration = 20, 
+#  dir = "../figures",
+#  type = "gif", 
+#  clean = TRUE, webshot=FALSE, fps=10)
+```
+
+#### *Rhodococcus enclensis*
+
+```{r PCA_clr_rhoen}
+
+res_pca <- PCA(t(rhoen_clr), scale.unit = TRUE, graph = FALSE)
+```
+
+
+```{r PERMANOVA_rhoen}
+counts_data <- t(rhoen_clr)
+metadata_tmp <- data.frame(metadata_table, stringsAsFactors = TRUE)
+permanova <- adonis2(formula = as.formula(paste0("counts_data~", "condition")), 
+                     data = metadata_tmp, method="euclidean", # method="bray", #otu_data~TIME
+                     permutations = 999, sqrt.dist = FALSE, add = FALSE, by = "terms")
+pv = permanova$`Pr(>F)`[1]
+# print(pv)
+
+rm(counts_data, metadata_tmp)
+```
+
+```{r PCA_2D_plots_rhoen, fig.height=4, fig.width=9}
+
+pca_tmp <- rbind(res_pca$ind$coord,
+                 res_pca$ind.sup$coord) %>% data.frame() %>% 
+  rownames_to_column("sample")
+
+
+pca_data <- left_join(pca_tmp, rownames_to_column(metadata_table), by=join_by("sample" == "rowname"))
+rm(pca_tmp)
+
+D1_text = paste0("Dim 1 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[1], digits=2), 
+                 "%)")
+D2_text = paste0("Dim 2 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[2], digits=2), 
+                 "%)")
+D3_text = paste0("Dim 3 (", 
+                 round(data.frame(res_pca$eig)$percentage.of.variance[3], digits=2), 
+                 "%)")
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.1, y=Dim.2, colour=color, ), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.2, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D1_text) + 
+  ylab(D2_text) +
+  ggtitle("PCA metatranscriptomics  \nR. enclensis") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p1
+ 
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.1, y=Dim.3, colour=color), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.3, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D1_text) + 
+  ylab(D3_text) +
+  ggtitle("PCA metatranscriptomics  \nR. enclensis") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p2
+
+ggplot(pca_data) +
+  geom_point(aes(x=Dim.2, y=Dim.3, colour=color), size=3) +
+  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  ggrepel::geom_text_repel(aes(x=Dim.2, y=Dim.3, colour=color, label=sample), 
+                           nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
+  xlab(D2_text) + 
+  ylab(D3_text) +
+  ggtitle("PCA metatranscriptomics  \nR. enclensis") +
+  labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
+  theme(panel.background= element_rect(fill="#f4f4f4"),
+        plot.caption = element_text(size=7)) -> p3
+
+plotgrid_PCA <- ggarrange(p1, p2, p3, labels = c("A", "B", "C"), common.legend=TRUE, legend="bottom", nrow=1) 
+
+print(plotgrid_PCA)
+
+ggsave(plot = plotgrid_PCA, filename = "../figures/PCA_metatranscriptomics_3_composantes_rhoen.tiff", dpi = 300, width = 15, height = 5, bg="white")
+
+ggsave(plot=p1, filename = "../figures/PCA_metatranscriptomics_rhoen.tiff", dpi = 300, width = 6, height = 5, bg="white")
+```
+
+```{r 3D_PCA_clr_rhoen, webgl=TRUE, message=FALSE, warning=FALSE, fig.height=7, fig.width=7}
+
+row_coord <- res_pca$ind$coord
+
+invisible(rgl::open3d())
+
+#rgl::bg3d("lightgray")
+rgl::plot3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1], 
+            y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2], 
+            z=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 3],
+            xlab = paste0(colnames(row_coord)[1] , " (" , substr(as.character(res_pca$eig[,2][1]), 1, 5) , "%)"),
+            ylab = paste0(colnames(row_coord)[2] , " (" , substr(as.character(res_pca$eig[,2][2]), 1, 5) , "%)"),
+            zlab = paste0(colnames(row_coord)[3] , " (" , substr(as.character(res_pca$eig[,2][3]), 1, 5) , "%)"),
+            xlim = c(min(row_coord[, 1]), max(row_coord[, 1])+10), 
+            ylim = c(min(row_coord[, 2]), max(row_coord[, 2])+10), 
+            zlim = c(min(row_coord[, 3]), max(row_coord[, 3])+10),
+            col = "darkcyan",
+            size=10,
+            main = "PCA R. enclensis")
+
+rgl::text3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1]+3, 
+            y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2]+3, 
+            z=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 3]+3,
+            text=c("WN_TF_1", "WN_TF_2", "WN_TF_3"),
+            col = "darkcyan",
+            size=10)
+
+
+rgl::points3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1], 
+              y=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 2], 
+              z=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 3],
+              col = "darkorange",
+              size=10)
+
+rgl::text3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1]+3, 
+            y=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 2]+3, 
+            z=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 3]+3,
+            text=c("SD_TF_1", "SD_TF_2", "SD_TF_3"),
+            col = "darkorange",
+            size=10)
+
+
+## Activate for or gif generation
+#par3d(windowRect = c(20, 30, 800, 800))
+
+#rgl::movie3d(
+#  movie="3DAnimated_PCA_rhoen", 
+#  spin3d( axis = c(0, 0, 1), rpm = 3),
+#  duration = 20, 
+#  dir = "../figures",
+#  type = "gif", 
+#  clean = TRUE, webshot=FALSE, fps=10)
+```
+
+
+### Samples hierarchical clustering by species {.tabset}
+#### *Dioszegia hungarica*
+
+```{r distance_matrices_diohu}
+#### Sample distances ####
+message("Computing inter-sample distances")
+
+## Pearson
+dist_pearson_diohu <- as.dist(1 - cor(diohu_clr, use = "everything", 
+                                method = "pearson"))
+```
+
+```{r sample_tree_diohu}
+message("Sample clustering")
+
+tree_pearson_diohu <- hclust(dist_pearson_diohu, method = "complete")
+
+```
+
+```{r pearson_tree_diohu, fig.height=7}
+par(bg = "white", mfrow=c(1, 1))
+plotColoredClusters(tree_pearson_diohu, labs = row.names(metadata_table),
+                    ylab = NA, xlab = NA, cex = 1, las = 1,
+                    cols = metadata_table$color, col = "black",
+                    main = "Samples Pearson distance hierarchical clustering,
+complete linkage, D. hungarica genes.")
+```
+
+Natural separation of samples according to their incubation condition for *D. hungarica*.
+
+#### *Pseudomonas graminis*
+
+```{r distance_matrices_psegr}
+#### Sample distances ####
+message("Computing inter-sample distances")
+
+## Pearson
+dist_pearson_psegr <- as.dist(1 - cor(psegr_clr, use = "everything", 
+                                method = "pearson"))
+```
+
+```{r sample_tree_psegr}
+message("Sample clustering")
+
+tree_pearson_psegr <- hclust(dist_pearson_psegr, method = "complete")
+```
+
+
+```{r pearson_tree_psegr, fig.height=7}
+par(bg = "white", mfrow=c(1, 1))
+plotColoredClusters(tree_pearson_psegr, labs = row.names(metadata_table),
+                    ylab = NA, xlab = NA, cex = 1, las = 1,
+                    cols = metadata_table$color, col = "black",
+                    main = "Samples Pearson distance hierarchical clustering,
+complete linkage, P. graminis genes.")
+```
+
+For *P. graminis*, the clustering does not distinguish between the two incubation conditions, probably because of the very low amounts of counts attributed to this species.
+
+
+#### *Pseudomonas syringae*
+
+```{r distance_matrices_psesy}
+#### Sample distances ####
+message("Computing inter-sample distances")
+
+## Pearson
+dist_pearson_psesy <- as.dist(1 - cor(psesy_clr, use = "everything", 
+                                method = "pearson"))
+```
+
+```{r sample_tree_psesy}
+message("Sample clustering")
+
+tree_pearson_psesy <- hclust(dist_pearson_psesy, method = "complete")
+```
+
+```{r pearson_tree_psesy, fig.height=7}
+par(bg = "white", mfrow=c(1, 1))
+plotColoredClusters(tree_pearson_psesy, labs = row.names(metadata_table),
+                    ylab = NA, xlab = NA, cex = 1, las = 1,
+                    cols = metadata_table$color, col = "black",
+                    main = "Samples Pearson distance hierarchical clustering,
+complete linkage, P. syringae genes.")
+```
+
+Samples are separated according to their experimental condition, which is encouraging for further analysis of *P. syringae*.
+
+
+
+#### *Rhodococcus enclensis*
+
+```{r distance_matrices_rhoen}
+#### Sample distances ####
+message("Computing inter-sample distances")
+
+## Pearson
+dist_pearson_rhoen <- as.dist(1 - cor(rhoen_clr, use = "everything", 
+                                method = "pearson"))
+```
+
+```{r sample_tree_rhoen}
+message("Sample clustering")
+
+tree_pearson_rhoen <- hclust(dist_pearson_rhoen, method = "complete")
+```
+
+```{r pearson_tree_rhoen, fig.height=7}
+par(bg = "white", mfrow=c(1, 1))
+plotColoredClusters(tree_pearson_rhoen, labs = row.names(metadata_table),
+                    ylab = NA, xlab = NA, cex = 1, las = 1,
+                    cols = metadata_table$color, col = "black",
+                    main = "Samples Pearson distance hierarchical clustering,
+complete linkage, R. enclensis genes.")
+```
+
+Again, samples are naturally separated according to their incubation condition for *R. enclensis*.
+
+
+```{r gene_tree_diohu, include=FALSE, echo=FALSE, eval=FALSE}
+
+# Gene tree with Pearson correlation ####
+message("Drawing gene tree")
+
+# Pearson distance gene
+dist_gene_pearson_diohu <- as.dist(1 - cor(t(diohu_clr),
+                                use = "everything", method = "pearson"))
+
+# tree
+tree_gene_pearson_diohu <- hclust(dist_gene_pearson_diohu, method = "complete")
+```
+
+
+```{r cut_tree_diohu, include=FALSE, echo=FALSE, eval=FALSE}
+# Let's try cutting the tree into 8 clusters at the height 1.97
+
+clusters_gene_pearson_diohu <- cutree(tree_gene_pearson_diohu, h=1.97)
+
+# How many genes are in each cluster?
+#table(clusters_gene_pearson_diohu)
+```
+
+```{r save_gene_clusters_diohu, include=FALSE, echo=FALSE, eval=FALSE}
+# Saving clustering results in gene dataframe 
+gene_stat_norm_diohu <- gene_stat_norm[diohu_geneid,]
+gene_stat_norm_diohu$cluster <- clusters_gene_pearson_diohu
+
+
+# We add the cluster information in the most_expressed_genes_stat
+my_colors = c("orange", "blue", "darkred", "skyblue", "darkgreen", "pink", "green", "red")
+
+#plot(tree_gene_pearson_diohu, las = 1, 
+#     ylab = NA, xlab = NA, cex = 0.1, hang = -1, col = "grey",
+#     main = "D. hungarica genes Pearson distance hierarchical clustering, complete linkage")
+
+#  rect.hclust(tree_gene_pearson_diohu, h=1.97, border = my_colors)
+```
+
+
+```{r gene_clustering_psegr, include=FALSE, echo=FALSE, eval=FALSE}
+#### Gene tree with Pearson correlation ####
+message("Drawing gene tree")
+
+# Pearson distance gene
+dist_gene_pearson_psegr <- as.dist(1 - cor(t(psegr_clr), 
+                                use = "everything", method = "pearson"))
+
+# tree
+tree_gene_pearson_psegr <- hclust(dist_gene_pearson_psegr, method = "complete")
+```
+
+```{r cut_tree_psegr, include=FALSE, echo=FALSE, eval=FALSE}
+clusters_gene_pearson_psegr <- cutree(tree_gene_pearson_psegr, h=1.92)
+
+# How many genes are in each cluster?
+#table(clusters_gene_pearson_psegr)
+```
+
+```{r save_gene_clusters_psegr, include=FALSE, echo=FALSE, eval=FALSE}
+# Saving clustering results in gene dataframe 
+# gene_stat_norm_psegr <- slice_tail(gene_stat_norm[psegr_geneid,], n=-2)
+gene_stat_norm_psegr <- gene_stat_norm[psegr_geneid,]
+gene_stat_norm_psegr$cluster <- clusters_gene_pearson_psegr
+
+
+# We add the cluster information in the most_expressed_genes_stat
+my_colors = c("orange", "blue", "darkred", "skyblue", "darkgreen", "pink", "green", "red")
+
+#plot(tree_gene_pearson_psegr, las = 1, 
+#     ylab = NA, xlab = NA, cex = 0.1, hang = -1, col = "grey",
+#     main = "P. graminis genes Pearson distance hierarchical clustering, complete linkage")
+
+#  rect.hclust(tree_gene_pearson_psegr, h=1.92, border = my_colors)
+```
+
+
+```{r gene_clustering_psesy, include=FALSE, echo=FALSE, eval=FALSE}
+#### Gene tree with Pearson correlation ####
+message("Drawing gene tree")
+
+# Pearson distance gene
+dist_gene_pearson_psesy <- as.dist(1 - cor(t(psesy_clr), 
+                                use = "everything", method = "pearson"))
+
+# tree
+tree_gene_pearson_psesy <- hclust(dist_gene_pearson_psesy, method = "complete")
+```
+
+```{r cut_tree_psesy, include=FALSE, echo=FALSE, eval=FALSE}
+clusters_gene_pearson_psesy <- cutree(tree_gene_pearson_psesy, h=1.91)
+
+# How many genes are in each cluster?
+#table(clusters_gene_pearson_psesy)
+```
+
+```{r save_gene_clusters_psesy, include=FALSE, echo=FALSE, eval=FALSE}
+# Saving clustering results in gene dataframe 
+# gene_stat_norm_psesy <- slice_tail(gene_stat_norm[psesy_geneid,], n=-2)
+gene_stat_norm_psesy <- gene_stat_norm[psesy_geneid,]
+gene_stat_norm_psesy$cluster <- clusters_gene_pearson_psesy
+
+
+# We add the cluster information in the most_expressed_genes_stat
+my_colors = c("orange", "blue", "darkred", "skyblue", "darkgreen", "pink", "green", "red")
+
+#plot(tree_gene_pearson_psesy, las = 1, 
+#     ylab = NA, xlab = NA, cex = 0.1, hang = -1, col = "grey",
+#     main = "P. syringae genes Pearson distance hierarchical clustering, complete linkage")
+
+#  rect.hclust(tree_gene_pearson_psesy, h=1.91, border = my_colors)
+```
+
+
+```{r gene_clustering_rhoen, include=FALSE, echo=FALSE, eval=FALSE}
+#### Gene tree with Pearson correlation ####
+message("Drawing gene tree")
+
+# Pearson distance gene
+dist_gene_pearson_rhoen <- as.dist(1 - cor(t(rhoen_clr), 
+                                use = "everything", method = "pearson"))
+
+# tree
+tree_gene_pearson_rhoen <- hclust(dist_gene_pearson_rhoen, method = "complete")
+```
+
+```{r cut_tree_rhoen, include=FALSE, echo=FALSE, eval=FALSE}
+clusters_gene_pearson_rhoen <- cutree(tree_gene_pearson_rhoen, h=1.8)
+
+# How many genes are in each cluster?
+#table(clusters_gene_pearson_rhoen)
+```
+
+```{r save_gene_clusters_rhoen, include=FALSE, echo=FALSE, eval=FALSE}
+# Saving clustering results in gene dataframe 
+# gene_stat_norm_rhoen <- slice_tail(gene_stat_norm[rhoen_geneid,], n=-2)
+gene_stat_norm_rhoen <- gene_stat_norm[rhoen_geneid,]
+gene_stat_norm_rhoen$cluster <- clusters_gene_pearson_rhoen
+
+
+# We add the cluster information in the most_expressed_genes_stat
+my_colors = c("orange", "blue", "darkred", "skyblue", "darkgreen", "pink", "green", "red")
+
+#plot(tree_gene_pearson_rhoen, las = 1, 
+#     ylab = NA, xlab = NA, cex = 0.1, hang = -1, col = "grey",
+#     main = "R. enclensis genes Pearson distance hierarchical clustering, complete linkage")
+
+#  rect.hclust(tree_gene_pearson_rhoen, h=1.8, border = my_colors)
+```
+
+
+
+```{r heatmap_diohu, fig.height=7, fig.width=7, include=FALSE, echo=FALSE, eval=FALSE}
+
+### Biclustering {.tabset}
+#### *Dioszegia hungarica*
+
+#### Heatmap with biclustering ####
+message("heatmap with biclustering")
+
+annot_clust_diohu = data.frame(as.factor(gene_stat_norm_diohu$cluster))
+colnames(annot_clust_diohu) <- "cluster"
+rownames(annot_clust_diohu) <- rownames(diohu_clr)
+
+pheatmap(diohu_clr,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         clustering_distance_rows = dist_gene_pearson_diohu,
+         clustering_distance_cols = dist_pearson_diohu,
+         border_color = NA,
+         show_rownames = FALSE,
+         annotation_row = annot_clust_diohu,
+         annotation_names_row = FALSE,
+         cutree_rows = 8,
+         cutree_cols = 2,
+         scale = "row",
+         use_raster = TRUE,
+         angle_col = "0",
+         main = "Biclustering of D. hungarica genes (Pearson distance) 
+and samples (Pearson distance)")
+```
+
+
+
+```{r heatmap_psegr, fig.height=7, fig.width=7, include=FALSE, echo=FALSE, eval=FALSE}
+#### *Pseudomonas graminis*
+
+#### Heatmap with biclustering ####
+message("heatmap with biclustering")
+
+annot_clust_psegr = data.frame(as.factor(gene_stat_norm_psegr$cluster))
+colnames(annot_clust_psegr) <- "cluster"
+rownames(annot_clust_psegr) <- rownames(psegr_clr)
+
+pheatmap(psegr_clr,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         clustering_distance_rows = dist_gene_pearson_psegr,
+         clustering_distance_cols = dist_pearson_psegr,
+         border_color = NA,
+         show_rownames = FALSE,
+         annotation_row = annot_clust_psegr,
+         annotation_names_row = FALSE,
+         cutree_rows = 3,
+         cutree_cols = 2,
+         scale = "row",
+         use_raster = TRUE,
+         angle_col = "0",
+         main = "Biclustering of P. graminis genes (Pearson distance) 
+and samples (Pearson distance)")
+
+# On voit combien les échantillons "nuit" sont différents les uns des autres. Les échantillons "jour" sont très proches entre eux car ils présentent partout quasiment pas d'expression.
+```
+
+
+
+```{r heatmap_psesy, fig.height=7, fig.width=7, include=FALSE, echo=FALSE, eval=FALSE}
+#### *Pseudomonas syringae*
+
+#### Heatmap with biclustering ####
+message("heatmap with biclustering")
+
+annot_clust_psesy = data.frame(as.factor(gene_stat_norm_psesy$cluster))
+colnames(annot_clust_psesy) <- "cluster"
+rownames(annot_clust_psesy) <- rownames(psesy_clr)
+
+pheatmap(psesy_clr,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         clustering_distance_rows = dist_gene_pearson_psesy,
+         clustering_distance_cols = dist_pearson_psesy,
+         border_color = NA,
+         show_rownames = FALSE,
+         annotation_row = annot_clust_psesy,
+         annotation_names_row = FALSE,
+         cutree_rows = 6,
+         cutree_cols = 2,
+         scale = "row",
+         use_raster = TRUE,
+         angle_col = "0",
+         main = "Biclustering of P. syringae genes (Pearson distance) 
+and samples (Pearson distance)")
+```
+
+
+
+```{r heatmap_rhoen, fig.height=7, fig.width=7, include=FALSE, echo=FALSE, eval=FALSE}
+#### *Rhodococcus enclensis*
+
+#### Heatmap with biclustering ####
+message("heatmap with biclustering")
+
+annot_clust_rhoen = data.frame(as.factor(gene_stat_norm_rhoen$cluster))
+colnames(annot_clust_rhoen) <- "cluster"
+rownames(annot_clust_rhoen) <- rownames(rhoen_clr)
+
+pheatmap(rhoen_clr,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         clustering_distance_rows = dist_gene_pearson_rhoen,
+         clustering_distance_cols = dist_pearson_rhoen,
+         border_color = NA,
+         show_rownames = FALSE,
+         annotation_row = annot_clust_rhoen,
+         annotation_names_row = FALSE,
+         cutree_rows = 6,
+         cutree_cols = 2,
+         scale = "row",
+         use_raster = TRUE,
+         angle_col = "0",
+         main = "Biclustering of R. enclensis genes (Pearson distance) 
+and samples (Pearson distance)")
+```
+
+## Differential analyses with MTXmodel (whole community metatranscriptomics data)
+
+MTXmodel was used on the complete community at once. 
+As input, filtered data (without the undetected genes) but untransformed was given to MTXmodel, as it performs its own CLR normalisation. 
+
+`analysis_method = 'LM'` 
+
+`correction = 'BH'`, 
+
+
+
+```{r fit_data_raw, eval=FALSE}
+fit_data <- MTXmodel(
+    counts_standard, metadata_table, 'MTXmodel_output',
+    cores = 2,
+    fixed_effects = c('temperature'),
+    reference = c("temperature,5"),
+    min_abundance = 0,
+    min_prevalence = 0,
+    normalization = 'CLR',
+    analysis_method = 'LM',
+    correction = 'BH',
+    standardize = FALSE,
+    transform = 'NONE',
+    plot_scatter = FALSE,
+    plot_heatmap = TRUE)
+
+```
+
+```{r MTX_model_volcano_plot, eval=FALSE}
+# par(mar=c(5,5,5,5), cex=1.0, cex.main=1.4, cex.axis=1.4, cex.lab=1.4)
+# topT <- read.csv("MTXmodel_output/all_results.tsv", sep="\t", row.names="feature")
+# 
+# #topT <- as.data.frame(resDESeq)
+# 
+# #Adjusted P values (FDR Q values)
+# with(topT, plot(coef, -log10(qval), pch=20, main="Volcano plot community", col="white", xlab=bquote(~MTXmodel~coefficient), ylab=bquote(~-log[10]~q~value), xlim=c(0.4,-0.4), ylim=c(0.6,1.2)))
+# 
+# with(subset(topT, qval<=0.2 & coef<=-0.1), points(coef, -log10(qval), pch=21, col="blue", bg="lightblue", cex=1.4, lwd=2))
+# with(subset(topT, qval<=0.2 & coef>=0.1), points(coef, -log10(qval), pch=21, col="orange", bg="gold", cex=1.4, lwd=2))
+# with(subset(topT, qval>0.2 | abs(coef)<0.1), points(coef, -log10(qval), pch=21, col="black", bg="grey", cex=1.4, lwd=2))
+# 
+# 
+# 
+# #Add lines for absolute FC>1 and P-value cut-off at FDR p adjusted value<0.2
+# abline(v=0, col="black", lty=3, lwd=1.0)
+# abline(v=-0.1, col="black", lty=4, lwd=1.0)
+# abline(v=0.1, col="black", lty=4, lwd=1.0)
+# abline(h=-log10(0.2), col="black", lty=4, lwd=1.0)
+# #abline(h=-log10(max(topT$pvalue[topT$padj<0.2], na.rm=TRUE)), col="black", lty=4, lwd=2.0)
+
+```
+
+```{r filter_MTXmodel_results}
+
+# Loading MTXmodel results
+res_mtx <- read.csv("../scripts/MTXmodel_output/all_results.tsv", sep="\t", row.names="feature")
+
+
+tryCatch({
+  inner_join(rownames_to_column(res_mtx), annotation_table_fig, by=c("rowname" = "gene")) -> res_mtx_fig
+  res_mtx_fig %>% filter(abs(qval) <= 0.2) -> res_mtx_fig
+  },
+  error=function(e){str(e)
+  }
+)
+
+
+## Data for final table
+annotation_table_long <- read.csv("../data/annotations_final_community_long.tsv", sep="\t", row.names = "Geneid")
+
+tryCatch({
+  annotation_table_long$gene <- row.names(annotation_table_long)
+  inner_join(rownames_to_column(res_mtx), annotation_table_long, by=c("rowname" = "gene")) -> res_mtx_filt
+  res_mtx_filt %>% filter(abs(qval) <= 0.2) -> res_mtx_filt
+  },
+  error=function(e){str(e)
+  }
+)
+
+```
+
+
+## Differential analyses with DESeq2 (metatranscriptomics data species by species)
+
+As a complementary approach, separate differential analyses were conducted for each species separately with DESeq2.
+
+### DESeq2 analyses preparation
+
+```{r converting_to_factors}
+metadata_table$temperature <- factor(metadata_table$temperature)
+
+```
+
+We use filtered counts data (only genes detected in at least 70% of biological samples). Zeroes are conserved as is. We round the counts matrix before performing DESeq2 analysis.
+
+```{r DESeq2_df}
+diohu_df <- counts_filtered[diohu_geneid,]
+psegr_df <- counts_filtered[psegr_geneid,]
+psesy_df <- counts_filtered[psesy_geneid,]
+rhoen_df <- counts_filtered[rhoen_geneid,]
+
+```
+
+```{r initialize_res_genus_df}
+res_df <- data.frame(gene=character(), 
+                     baseMean=numeric(),
+                     log2FoldChange=numeric(), 
+                     lfcSE=numeric(), 
+                     stat=numeric(), 
+                     pvalue=numeric(), 
+                     padj=numeric(), 
+                     condition=factor(),
+                     SAMPLE_COMPARISON=factor(),
+                     organism=factor())
+```
+
+### *Dioszegia hungarica*
+
+```{r DESeq2_diohu_2024}
+compute_deseq2_analysis(diohu_df, 
+                        metadata_table,
+                        #subset_var = "temperature", 
+                        #select = "3.5", 
+                        contrast_col="temperature", 
+                        ref="5", 
+                        tested="17") -> res
+
+tryCatch({res$organism <- "D. hungarica"},
+  error=function(e){str(e) # prints structure of exception
+  })
+
+res_df <- rbind(res_df, res) 
+
+```
+
+### *Rhodococcus enclensis*
+
+```{r DESeq2_rhoen_2024}
+
+compute_deseq2_analysis(rhoen_df, 
+                        metadata_table,
+                        #subset_var = "temperature", 
+                        #select = "3.5", 
+                        contrast_col="temperature", 
+                        ref="5", 
+                        tested="17") -> res
+
+tryCatch({res$organism <- "R. enclensis"},
+  error=function(e){str(e)
+  })
+
+res_df <- rbind(res_df, res) 
+
+```
+
+### *Pseudomonas syringae*
+
+```{r DESeq2_psesy_2024}
+
+compute_deseq2_analysis(psesy_df, 
+                        metadata_table,
+                        #subset_var = "temperature", 
+                        #select = "3.5", 
+                        contrast_col="temperature", 
+                        ref="5", 
+                        tested="17") -> res
+
+tryCatch({res$organism <- "P. syringae"},
+  error=function(e){str(e)
+  })
+
+res_df <- rbind(res_df, res) 
+
+```
+
+### *Pseudomonas graminis*
+
+```{r DESeq2_psegr_2024}
+
+compute_deseq2_analysis(psegr_df, 
+                        metadata_table,
+                        #subset_var = "temperature", 
+                        #select = "3.5", 
+                        contrast_col="temperature", 
+                        ref="5", 
+                        tested="17") -> res
+
+tryCatch({res$organism <- "P. graminis"},
+  error=function(e){str(e)
+  })
+
+res_df <- rbind(res_df, res) 
+
+```
+
+### Filter DESeq2 data
+
+```{r prep_df_DESeq2_plot}
+
+
+tryCatch({
+  res_df %>% inner_join(annotation_table_fig, by="gene") -> tmp_res_df
+  tmp_res_df %>% filter(padj <= 0.2) -> res_deseq_fig  #& abs(log2FoldChange) >= 1
+  },
+  error=function(e){str(e)
+  }
+)
+
+rm(tmp_res_df)
+
+## data for final table
+# annotation_table_long <- read.csv("../../mock_communities/data/annotations_final_community.tsv", sep="\t", row.names = "Geneid")
+annotation_table_long <- read.csv("../data/annotations_final_community_long.tsv", sep="\t", row.names = "Geneid")
+
+tryCatch({
+  annotation_table_long$gene <- row.names(annotation_table_long)
+  res_df %>% inner_join(annotation_table_long, by="gene") -> res_df
+  res_df %>% filter(padj <= 0.2) -> res_deseq_filt # & abs(log2FoldChange) >= 1
+  },
+  error=function(e){str(e)
+  }
+)
+```
+
+### Save differentially expressed genes (DEGs) all methods
+
+```{r save_DEG_commu_all}
+
+temp_df <- right_join(rownames_to_column(res_mtx), annotation_table_long, join_by("rowname"=="gene"))
+rename(temp_df, "gene" = "rowname") -> temp_df
+
+
+
+all_genes <- full_join(res_df, temp_df,  by=c("gene", "locus_tag", "transcriptId", "Organism",
+                                              "Chr", "Start", "End", "Strand", "Length",
+                                              "product", "COG_process", "COG_category",
+                                              "COGid", "GOs", "COG_cat", "COG_category_long",
+                                              "ecNum" ),
+                       suffix = c("", "w"))
+
+rm(temp_df)
+columns_to_remove <- grep(".w", names(all_genes))
+all_genes %>% dplyr::select(-columns_to_remove) %>% filter(qval<=0.2 | padj<=0.2 ) -> all_genes_filtered
+
+write.table(all_genes_filtered, "../results/DEG_all_methods_community.tsv", sep='\t', row.names = FALSE)
+
+write.table(res_df, "../results/DEG_DESeq2_all_community.tsv", sep='\t', row.names = FALSE)
+sign_deseq2_df <- res_df
+```
+
+## Plot DEGs all methods
+
+
+```{r plot_all_degs_vertical, fig.height=12, fig.dpi=200, fig.width=13}
+
+#### Both methods DEGs
+
+
+full_join(all_genes_filtered, annotation_table_fig, by="gene") -> data
+
+
+data$title <- "Differentially expressed genes SD vs WN (DESeq2 & MTXmodel)"
+data$Organism <- factor(data$organism, levels=c("D. hungarica", "P. graminis", "P. syringae", "R. enclensis"))
+
+
+
+
+custom_strips <- strip_nested(background_x = elem_list_rect(fill = c("lightgrey", 
+                                                                     species_colours[["D.hungarica"]], 
+                                                                     species_colours[["P.syringae"]], 
+                                                                     species_colours[["R.enclensis"]])),
+                              text_x = list(element_text(face = "plain", colour = "black", size = 17),
+                                            element_text(face = "italic", colour = "white", size = 15),
+                                            element_text(face = "italic", colour = "white", size = 15), 
+                                            element_text(face = "italic", colour = "white", size = 15)),
+                              by_layer_x = FALSE)
+
+
+ggplot(data, aes(x = coef, y = COG_category.y,  color = after_scale(alpha(fill, 0.3)), fill=COG_category_long.y, alpha=0.7, label=name_figure)) + 
+  geom_point(aes(alpha=0.7), position="dodge") +
+  geom_violin(aes(alpha=0.3), show.legend = TRUE) +
+  annotate("rect", xmin=-Inf, xmax=0, ymin=-Inf, ymax=Inf, fill="#184ca5", alpha=0.1) +
+  annotate("rect", xmin=0, xmax=Inf, ymin=-Inf, ymax=Inf, fill="gold", alpha=0.1) +
+  geom_vline(xintercept = 0, linetype="dashed") +
+  ylab("COG category") +
+  xlab("MTXmodel coefficient") +
+  ggrepel::geom_text_repel(nudge_y = 0.5, segment.size=0.1, seed = 42) +
+  guides(fill=guide_legend(ncol=3), alpha="none", color="none") + #color="none",
+  scale_y_discrete(limits=rev(names(vect_COG_category_long))) +
+  scale_colour_manual(limits=vect_COG_category_long, values=COG_colours, drop=FALSE) + 
+  scale_fill_manual(limits=vect_COG_category_long, values=COG_colours, drop=FALSE) +
+  theme(axis.title = element_text(size=13, "Differentially expressed genes SD vs WN"),
+        axis.text = element_text(size=13),
+        strip.text.y = element_text(size = 17),
+        #strip.text.x = element_text(size = 17, face = "italic"),
+        legend.text = element_text(size = 10),
+        legend.title = element_blank(),
+        legend.key.size = unit(0.5, "line"),
+        legend.position = "bottom",
+        panel.background = element_rect(fill = "#f4f4f4")) +
+  facet_nested(~title + Organism, strip = custom_strips, drop=TRUE) -> plot
+
+print(plot)
+
+ggsave(plot = plot, filename = "../figures/DEG_day_vs_night_commu_both_methods_vertical.tiff", dpi = 300, width = 13, height = 13, bg="white")
+
+```
+
+
+
+## Venn diagram of differential expression results
+
+```{r venn_diagram_MTX_initial, error=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=9, fig.dpi=100}
+
+
+list_venn <- list(res_deseq_filt[(res_deseq_filt$SAMPLE_COMPARISON == "17_VS_5"), "gene"],
+                  res_mtx_filt[, "rowname"])
+
+invisible(grid.newpage())   
+draw.pairwise.venn(area1 = length(list_venn[[1]]),
+                 area2 = length(list_venn[[2]]),
+                 cross.area = length(intersect.Vector(list_venn[[1]], list_venn[[2]])),
+                 fill = c("#D53F7F", "#039EBD"),
+                 lty = "blank",
+                 fontfamily = "Helvetica",
+                 cex = rep(2, 3),
+                 cat.cex = rep(1.5, 2),
+                 cat.pos = c(-50, 50),
+                 cat.dist = c(-0.05, -0.05),
+                 cat.prompts = TRUE,
+                 cat.col = c("#D53F7F", "#039EBD"),
+                 cat.fontfamily = "Helvetica",
+                 category = c("DESeq  \nalone", "MTXModel  \ncommunity"),
+                 title = "Differentially abundant genes found by DESeq2 and MTXmodel",
+                 margin = 0.1) -> venn_plot
+
+
+# Writing to file
+
+invisible(png(filename = "../figures/Venn_diagram_ALDEXe2_MTX_DESeq_community.png", 
+     width = 1000, height = 1000))
+invisible(grid.draw(venn_plot))
+invisible(dev.off())
+```
+
+```{r merge_differential_analyses_results}
+
+vect_degs <- all_genes_filtered$gene
+counts_clr_degs <- as.matrix(counts_clr)[vect_degs,]
+```
+
+
+## Differential Metabolites intensity
+
+
+```{r prepare_intensity_metaB_data}
+
+identified_metabolites <- left_join(metabolomics_annotations[,c("metabolite identification", "ID")],
+                                        rownames_to_column(metabolomics_all_times_filtered), by = join_by("ID" == "rowname"))  #rownames_to_column(metabolomics_all_times_clr)
+
+identified_metabolites <- identified_metabolites[identified_metabolites$`metabolite identification` != "unknown",]
+
+row.names(identified_metabolites) <- identified_metabolites$`metabolite identification`
+
+identified_metabolites <- identified_metabolites %>% t() %>% data.frame()
+
+
+identified_metabolites <- identified_metabolites[3:nrow(identified_metabolites),] 
+identified_metabolites$sample <- row.names(identified_metabolites)
+
+identified_metabolites <- left_join(identified_metabolites, rownames_to_column(metadata_table_metaB_all_times), by = join_by("sample" == "rowname"))
+
+identified_metabolites %>% rename("2-Aminobenzoic acid" = "X2.aminobenzoic.acid",
+                                      "DL-Methionine sulfoxide" = "DL.methionine.sulfoxide",
+                                      "Pyridoxal" = "pyridoxal",
+                                      "D-Pantothenic acid" = "D.pantothenic.acid" ,
+                                      "N6-Acetyl-L-lysine" = "N6.acetyl.L.lysine",
+                                      "L-Glutamic acid" = "L.glutamic.acid",
+                                      "L-Isoleucine" = "L.isoleucine",
+                                      "Butyryl-L-carnitine" = "butyryl.L.carnitine",
+                                      "Acetyl-L-carnitine" = "acetyl.L.carnitine",
+                                      "Isovaleryl-L-carnitine" = "isovaleryl.L.carnitine") -> identified_metabolites 
+
+identified_metabolites %>%
+  pivot_longer(cols = c("2-Aminobenzoic acid", "DL-Methionine sulfoxide", "Pyridoxal", 
+                        "D-Pantothenic acid", "N6-Acetyl-L-lysine", "L-Glutamic acid", 
+                        "L-Isoleucine", "Butyryl-L-carnitine", "Acetyl-L-carnitine", 
+                        "Isovaleryl-L-carnitine"), 
+               values_to = "intensity") -> identified_metabolites
+ 
+
+  
+identified_metabolites[identified_metabolites$temperature == 17 & identified_metabolites$time == 0, "condition"] <- "SD_T0"
+identified_metabolites[identified_metabolites$temperature == 5 & identified_metabolites$time == 0, "condition"] <- "WN_T0"
+identified_metabolites[identified_metabolites$temperature == 17 & identified_metabolites$time == 3, "condition"] <- "SD_TF"
+identified_metabolites[identified_metabolites$temperature == 5 & identified_metabolites$time == 3, "condition"] <- "WN_TF"
+identified_metabolites[identified_metabolites$temperature == 17, "fill"] <- "#F8AD18"
+identified_metabolites[identified_metabolites$temperature == 5, "fill"] <- "#89DDF8"
+identified_metabolites[identified_metabolites$temperature == 17, "colour"] <- "#b0790b"
+identified_metabolites[identified_metabolites$temperature == 5, "colour"] <- "#1aa7d4"
+
+identified_metabolites$intensity <- as.numeric(identified_metabolites$intensity)
+
+
+
+```
+
+
+### Metabolites more abundant in WN
+
+```{r intensity_metaB_WN}
+
+  
+
+identified_metabolites %>% 
+  filter(name %in% c("2-Aminobenzoic acid", "L-Glutamic acid",
+                     "DL-Methionine sulfoxide", "N6-Acetyl-L-lysine",
+                     "D-Pantothenic acid", "Pyridoxal" )) %>%
+  filter(condition %in% c("SD_TF", "WN_TF")) %>%
+  ggplot(aes(y=intensity, x=condition, group=condition)) +
+  geom_boxplot(aes(fill=fill, colour=colour)) +
+  scale_fill_identity() +
+  scale_color_identity() +
+  theme(strip.text = element_text(face = "bold", size=12),
+        axis.title.x = element_blank()) +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE), limits = c(0,NA), breaks = extended_breaks(n=5)) +
+  facet_wrap(~name, scale="free", ncol=2) -> plot_wn
+
+
+print(plot_wn)
+
+ggsave(plot = plot_wn, filename = "../figures/metabolites_WN.tiff", dpi = 300, width = 8, height = 6, bg="white")
+
+
+```
+
+
+### Metabolites more abundant in SD
+
+```{r intensity_metaB_SD}
+
+
+
+identified_metabolites %>% filter(name %in% c("L-Isoleucine", "Acetyl-L-carnitine",
+                                                   "Butyryl-L-carnitine",
+                                                   "Isovaleryl-L-carnitine")) %>%
+  filter(condition %in% c("SD_TF", "WN_TF")) %>%
+  ggplot(aes(y=intensity, x=condition, group=condition)) +
+  geom_boxplot(aes(fill=fill, colour=colour)) +
+  scale_fill_identity() +
+  scale_color_identity() +
+  theme(strip.text = element_text(face = "bold", size=12),
+        axis.title.x = element_blank()) +
+  scale_y_continuous(labels = function(x) format(x, scientific = TRUE), limits = c(0,NA), breaks = extended_breaks(n=5)) +
+  facet_wrap(~name, scale="free", ncol=2) -> plot_sd
+
+print(plot_sd)
+
+ggsave(plot = plot_sd, filename = "../figures/metabolites_SD.tiff", dpi = 300, width = 8, height = 4, bg="white")
+
+
+```
+
+
+### Session informations
+
+```{r Session_info}
+sessionInfo()
+```
