@@ -70,7 +70,7 @@ list_lib_ver <- list(c("stats"),  c("grid"), c("utils"), c("graphics"),
                      c("ggh4x", "0.2.8"), c("FactoMineR", "2.10"),
                      c("data.table", "1.15.2"), c("BiocManager", "1.30.22"),
                      c("ClassDiscovery", "3.4.0"), c("compositions", "2.0-8"),
-                     c("cplm", "0.7-12"),
+                     c("cplm", "0.7-12"), c("ggtext", "0.1.2"),
                      c("tidyverse", "2.0.0"), c("rlang", "1.1.3")
                      )
 
@@ -1070,7 +1070,9 @@ chem_data[chem_data$condition == "SD",] %>% ggplot() +
   scale_colour_identity("category", labels = c("abiotic SD", "community SD"), 
                         guide="legend") +
   scale_fill_identity() +
-  ylab(label = "Relative H2O2 evolution") +
+  # ylab(label = expression(paste0("Relative ", H[2], O[2], " evolution"))) +
+  # ylab(label = expression(Relative~H[2]O[2]~evolution)) +
+  ylab("Relative H<sub>2</sub>O<sub>2</sub> evolution") +
   xlab(label = "Incubation time (h)") +
   # facet_grid(rows = vars(experiment), cols = vars(condition)) + #, nrow=2, ncol=2
   facet_grid(rows = vars(condition), cols = vars(experiment),
@@ -1079,11 +1081,12 @@ chem_data[chem_data$condition == "SD",] %>% ggplot() +
                                       "SD" = "SD",
                                       "WN" = "WN"))) + 
   theme(legend.position = "bottom",
-        panel.background = element_rect(fill="#f4f4f4")) +
+        panel.background = element_rect(fill="#f4f4f4"),
+        axis.title.y = element_markdown()) +
   
   
   geom_path(data = line_data[line_data$category == "biotic_SD",], 
-            aes(x = sampling_time,y =H2O2_mean, color = color), 
+            aes(x = sampling_time, y = H2O2_mean, color = color), 
             linewidth = 1) + 
   geom_ribbon(data = line_data[line_data$category == "biotic_SD",], 
               aes(x = sampling_time, 
@@ -1091,7 +1094,7 @@ chem_data[chem_data$condition == "SD",] %>% ggplot() +
                   ymax = H2O2_mean + H2O2_sd,
                   fill = color), alpha=0.25, linewidth=0.05) +
   
-    geom_path(data = line_data[line_data$category == "abiotic_SD",], 
+  geom_path(data = line_data[line_data$category == "abiotic_SD",], 
             aes(x = sampling_time,y =H2O2_mean, color = color), 
             linewidth = 1) + 
   geom_ribbon(data = line_data[line_data$category == "abiotic_SD",], 
