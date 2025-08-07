@@ -67,7 +67,8 @@ list_lib_ver <- list(c("stats"),  c("grid"), c("utils"), c("graphics"),
                      c("data.table", "1.15.2"), c("BiocManager", "1.30.22"),
                      c("ClassDiscovery", "3.4.0"), c("compositions", "2.0-8"),
                      c("cplm", "0.7-12"), c("ggtext", "0.1.2"),
-                     c("tidyverse", "2.0.0"), c("rlang", "1.1.3")
+                     c("tidyverse", "2.0.0"), c("rlang", "1.1.3"),
+                     c("stringr", "1.5.1"), c("ggridges", "0.5.6") #, c("ggtext", "0.1.2")
                      )
 
 for (lib in list_lib_ver){
@@ -220,7 +221,7 @@ counts_table %>% rename("WN_TF_1" = "S_5C1",
 
 annotation_table <- read.csv("../data/annotations_final_community_updated.tsv", sep="\t", row.names = "Geneid")
 annotation_all <- read.csv("../data/annotations_final_community_updated.tsv", sep="\t", row.names = "Geneid")
-annotation_table_long <- read.csv("../data/annotations_final_community_long.tsv", sep="\t", row.names = "Geneid")
+annotation_table_long <- read.csv("../data/annotations_final_community_long2.tsv", sep="\t", row.names = "Geneid")
 
 ## added july 2024
 counts_table <- counts_table[intersect(rownames(counts_table), rownames(annotation_all)),]
@@ -1265,7 +1266,7 @@ ggplot(pca_data) +
   ggtitle("PCA metatranscriptomics") +
   labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
   theme(panel.background= element_rect(fill="#f4f4f4"),
-        plot.caption = element_text(size=7)) -> p1
+        plot.caption = element_text(size=7)) -> p1_metaT
  
 
 ggplot(pca_data) +
@@ -1292,13 +1293,13 @@ ggplot(pca_data) +
   theme(panel.background= element_rect(fill="#f4f4f4"),
         plot.caption = element_text(size=7)) -> p3
 
-plotgrid_PCA <- ggarrange(p1, p2, p3, labels = c("A", "B", "C"), common.legend=TRUE, legend="bottom", nrow=1) 
+plotgrid_PCA <- ggarrange(p1_metaT, p2, p3, labels = c("A", "B", "C"), common.legend=TRUE, legend="bottom", nrow=1) 
 
 print(plotgrid_PCA)
 
 ggsave(plot = plotgrid_PCA, filename = "../figures/PCA_metatranscriptomics_3_composantes.tiff", dpi = 300, width = 15, height = 5, bg="white")
 
-ggsave(plot=p1, filename = "../figures/PCA_metatranscriptomics.tiff", dpi = 300, width = 6, height = 5, bg="white")
+ggsave(plot=p1_metaT, filename = "../figures/PCA_metatranscriptomics.tiff", dpi = 300, width = 6, height = 5, bg="white")
 ```
 
 
@@ -1528,6 +1529,18 @@ rgl::text3d(x=row_coord[c("SD_T0_1", "SD_T0_2", "SD_T0_3"), 1]+5,
 #  clean = TRUE, webshot=FALSE, fps=20)
 ```
 
+```{r plot_Figure2}
+
+plot_all <- ggarrange(p1_metaB, p1_metaT, 
+                      labels = c("A", "B"), 
+                      common.legend=TRUE,
+                      legend="bottom",
+                      nrow=1,
+                      widths = c(1, 1))
+
+ggsave(plot = plot_all, filename = "../figures/Figure_2.tiff", dpi = 300, width = 11, height = 6, bg="white")
+
+```
 
 ## Individual exploratory analysis of metatranscriptomics data by species
 
@@ -2677,7 +2690,7 @@ tryCatch({
 
 
 ## Data for final table
-annotation_table_long <- read.csv("../data/annotations_final_community_long.tsv", sep="\t", row.names = "Geneid")
+annotation_table_long <- read.csv("../data/annotations_final_community_long2.tsv", sep="\t", row.names = "Geneid")
 
 tryCatch({
   annotation_table_long$gene <- row.names(annotation_table_long)
@@ -2820,7 +2833,7 @@ tryCatch({
 rm(tmp_res_df)
 
 ## data for final table
-annotation_table_long <- read.csv("../data/annotations_final_community_long.tsv", sep="\t", row.names = "Geneid")
+annotation_table_long <- read.csv("../data/annotations_final_community_long2.tsv", sep="\t", row.names = "Geneid")
 
 tryCatch({
   annotation_table_long$gene <- row.names(annotation_table_long)
@@ -2858,12 +2871,12 @@ write.table(res_df, "../results/DEG_DESeq2_all_community.tsv", sep='\t', row.nam
 sign_deseq2_df <- res_df
 ```
 
-## Plot DEGs all methods
+## Plot transcript expression coefficient (SD vs WN)
 
-
-```{r plot_all_degs_vertical, fig.height=12, fig.dpi=200, fig.width=13}
+```{r plot_all_degs_Figure4_panelA}
 
 #### Both methods DEGs
+
 
 
 full_join(all_genes_filtered, annotation_table_fig, by="gene") -> data
@@ -2895,7 +2908,7 @@ ggplot(data, aes(x = coef, y = COG_category.y,  color = after_scale(alpha(fill, 
   ylab("COG category") +
   xlab("MTXmodel coefficient") +
   ggrepel::geom_text_repel(nudge_y = 0.5, segment.size=0.1, seed = 42) +
-  guides(fill=guide_legend(ncol=3), alpha="none", color="none") + #color="none",
+  guides(fill=guide_legend(ncol=4), alpha="none", color="none") + #color="none",
   scale_y_discrete(limits=rev(names(vect_COG_category_long))) +
   scale_colour_manual(limits=vect_COG_category_long, values=COG_colours, drop=FALSE) + 
   scale_fill_manual(limits=vect_COG_category_long, values=COG_colours, drop=FALSE) +
@@ -2903,22 +2916,101 @@ ggplot(data, aes(x = coef, y = COG_category.y,  color = after_scale(alpha(fill, 
         axis.text = element_text(size=13),
         strip.text.y = element_text(size = 17),
         #strip.text.x = element_text(size = 17, face = "italic"),
-        legend.text = element_text(size = 10),
+        legend.text = element_text(size = 12),
         legend.title = element_blank(),
         legend.key.size = unit(0.5, "line"),
         legend.position = "bottom",
         panel.background = element_rect(fill = "#f4f4f4")) +
-  facet_nested(~title + Organism, strip = custom_strips, drop=TRUE) -> plot
+  facet_nested(~title + Organism, strip = custom_strips, drop=TRUE) -> plot_degs
 
-print(plot)
+# print(plot_degs)
+# 
+# ggsave(plot = plot_degs, filename = "../figures/DEG_day_vs_night_commu_both_methods_vertical.tiff", dpi = 300, width = 13, height = 13, bg="white")
 
-ggsave(plot = plot, filename = "../figures/DEG_day_vs_night_commu_both_methods_vertical.tiff", dpi = 300, width = 13, height = 13, bg="white")
+```
 
+```{r plot_all_transcript_Figure4_panelB}
+
+columns_to_remove <- grep(".w", names(all_genes))
+all_genes %>% dplyr::select(-columns_to_remove) %>% filter(!is.na(coef)) -> all_genes_unfiltered
+
+full_join(all_genes_unfiltered, annotation_table_long, by="gene") %>% filter(!is.na(coef)) -> data
+data[data$COG_category_long.y == "S: Function Unknown", "COG_category_long.y"] <- "S: Function unknown"
+data$title <- "All detected genes"
+data$subtitle <- "Assemblage"
+data$Organism <- factor(data$organism, levels=c("D. hungarica", "P. graminis", "P. syringae", "R. enclensis"))
+data$COG_category_fig <- substr(data$COG_category_long.y, 0, 1)
+
+
+custom_strips <- strip_nested(background_x = elem_list_rect(fill = c("lightgrey", "black")),
+                              text_x = list(element_text(face = "plain", colour = "black", size = 17),
+                                            element_text(face = "italic", colour = "white", size = 15)),
+                              by_layer_x = FALSE)
+
+custom_strips_strains <- strip_nested(background_x = elem_list_rect(fill = c("lightgrey", 
+                                                                     species_colours[["D.hungarica"]], 
+                                                                     species_colours[["P.syringae"]], 
+                                                                     species_colours[["R.enclensis"]])),
+                              text_x = list(element_text(face = "plain", colour = "black", size = 17),
+                                            element_text(face = "italic", colour = "white", size = 15),
+                                            element_text(face = "italic", colour = "white", size = 15), 
+                                            element_text(face = "italic", colour = "white", size = 15)),
+                              by_layer_x = FALSE)
+
+ggplot(data, aes(x = coef, y = COG_category_fig,color = after_scale(alpha(fill, 0.3)), fill=COG_category_long.y, alpha=0.9)) + #label=name_figure
+  # geom_point(aes(alpha=0.7)) + #, position="dodge"
+  geom_violin(aes(alpha=0.3), show.legend = TRUE) +
+  geom_boxplot(outlier.colour = "black", width=0.2, color="white", outlier.alpha = 0.4, alpha=0.2, show.legend = FALSE) +
+  annotate("rect", xmin=-Inf, xmax=0, ymin=-Inf, ymax=Inf, fill="#184ca5", alpha=0.1) +
+  annotate("rect", xmin=0, xmax=Inf, ymin=-Inf, ymax=Inf, fill="gold", alpha=0.1) +
+  geom_vline(xintercept = 0, linetype="dashed") +
+  ylab("COG category") +
+  xlab("MTXmodel coefficient") +
+  # ggrepel::geom_text_repel(nudge_y = 0.5, segment.size=0.1, seed = 42) +
+  guides(fill=guide_legend(ncol=4), alpha="none", color="none") + #color="none",
+  scale_y_discrete(limits=rev(names(vect_COG_category_long))) +
+  scale_colour_manual(limits=vect_COG_category_long, values=COG_colours, drop=FALSE) + 
+  scale_fill_manual(limits=vect_COG_category_long, values=COG_colours, drop=FALSE) +
+  theme(axis.title = element_text(size=13, "Expression coefficient (in SD vs WN) of all assemblage detected genes"),
+        axis.text = element_text(size=13),
+        strip.text.y = element_text(size = 17),
+        #strip.text.x = element_text(size = 17, face = "italic"),
+        legend.text = element_text(size = 12),
+        legend.title = element_blank(),
+        legend.key.size = unit(0.5, "line"),
+        legend.position = "bottom",
+        panel.background = element_rect(fill = "#f4f4f4")) -> p
+
+  p + facet_nested(~title + subtitle, strip = custom_strips, drop=TRUE) -> plot_assemblage
+  p + facet_nested(~title + Organism, strip = custom_strips_strains, drop=TRUE) + 
+    guides(fill=guide_legend(ncol=3), alpha="none", color="none") + 
+    theme(legend.text = element_text(size = 10))-> plot_strains
+
+# print(plot_assemblage)
+# 
+ggsave(plot = plot_assemblage, filename = "../figures/expressed_genes_MTX_coeff_assemblage.tiff", dpi = 300, width = 13/3, height = 13, bg="white")
+
+ggsave(plot = plot_strains, filename = "../figures/expressed_genes_MTX_coeff_strains.tiff", dpi = 300, width = 13, height = 13, bg="white")
+
+```
+
+```{r plot_Figure4, fig.height=12, fig.dpi=200, fig.width=17.35}
+plot_all <- ggarrange(plot_assemblage, plot_degs, 
+                      labels = c("A", "B"), 
+                      common.legend=TRUE,
+                      legend="bottom",
+                      nrow=1,
+                      widths = c(1, 3))
+
+print(plot_all)
+ggsave(plot = plot_all, filename = "../figures/Figure_4.tiff", dpi = 300, width = 13+4.35, height = 13, bg="white")
+
+print(plot_strains)
 ```
 
 
 
-## Venn diagram of differential expression results
+## Venn diagram of RNA differential expression results
 
 ```{r venn_diagram_MTX_initial, error=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=9, fig.dpi=100}
 
@@ -3016,61 +3108,122 @@ identified_metabolites$intensity <- as.numeric(identified_metabolites$intensity)
 ```
 
 
+
+
+```{r intensity_metaB_WN_Figure3_panelA}
 ### Metabolites more abundant in WN
+  
+# 
+# identified_metabolites %>% 
+#   filter(name %in% c("2-Aminobenzoic acid", "L-Glutamic acid",
+#                      "DL-Methionine sulfoxide", "N6-Acetyl-L-lysine",
+#                      "D-Pantothenic acid", "Pyridoxal" )) %>%
+# filter(condition %in% c("SD_TF", "WN_TF")) %>%
+#   # ggplot(aes(y=intensity, x=condition, group=condition)) +
+#   ggplot(aes(y=intensity, x=name, fill=condition)) +
+#   geom_boxplot(aes(fill=fill, colour=colour)) +
+#   scale_fill_identity() +
+#   scale_color_identity() +
+#   ylab(expression("intensity * 10"^" -2")) + 
+#   theme(strip.text = element_text(face = "bold", size=12),
+#         axis.title.x = element_blank()) +
+#   # facet_wrap(~name, scale="free", ncol=2) +
+#   scale_y_continuous(labels = function(x) format(x * 100, scientific = FALSE, digits=3), 
+#                      limits = c(0,NA), breaks = extended_breaks(n=5)) -> plot_wn
 
-```{r intensity_metaB_WN}
 
+# print(plot_wn)
+# 
+# ggsave(plot = plot_wn, filename = "../figures/metabolites_WN.tiff", dpi = 300, width = 8, height = 6, bg="white")
+
+
+```
+
+
+
+
+```{r intensity_metaB_SD_Figure3_panelB}
+### Metabolites more abundant in SD
+
+# 
+# identified_metabolites %>% filter(name %in% c("L-Isoleucine", "Acetyl-L-carnitine",
+#                                                    "Butyryl-L-carnitine",
+#                                                    "Isovaleryl-L-carnitine")) %>%
+#   filter(condition %in% c("SD_TF", "WN_TF")) %>%
+#   # ggplot(aes(y=intensity, x=condition, group=condition)) +
+#   ggplot(aes(y=intensity, x=name, fill=condition)) +
+#   geom_boxplot(aes(fill=fill, colour=colour)) +
+#   scale_fill_identity() +
+#   scale_color_identity() +
+#   ylab(expression("intensity * 10"^" -2")) + 
+#   theme(strip.text = element_text(face = "bold", size=12),
+#         axis.title.x = element_blank()) +
+#   # facet_wrap(~name, scale="free", ncol=2) +
+#   scale_y_continuous(labels = function(x) format(x * 100, scientific = FALSE, digits=3), 
+#                      limits = c(0,NA), breaks = extended_breaks(n=5)) -> plot_sd
+# 
+# print(plot_sd)
+# 
+# ggsave(plot = plot_sd, filename = "../figures/metabolites_SD.tiff", dpi = 300, width = 8, height = 4, bg="white")
+
+
+```
+
+### Differentially abundant metabolites between SD and WN
+
+```{r plot_Figure3, fig.height=7}
   
 
 identified_metabolites %>% 
   filter(name %in% c("2-Aminobenzoic acid", "L-Glutamic acid",
                      "DL-Methionine sulfoxide", "N6-Acetyl-L-lysine",
                      "D-Pantothenic acid", "Pyridoxal" )) %>%
-  filter(condition %in% c("SD_TF", "WN_TF")) %>%
-  ggplot(aes(y=intensity, x=condition, group=condition)) +
+filter(condition %in% c("SD_TF", "WN_TF")) %>%
+  # ggplot(aes(y=intensity, x=condition, group=condition)) +
+  ggplot(aes(y=intensity, x=name, fill=condition)) +
   geom_boxplot(aes(fill=fill, colour=colour)) +
   scale_fill_identity() +
   scale_color_identity() +
+  ylab(expression("intensity * 10"^" -2")) + 
   theme(strip.text = element_text(face = "bold", size=12),
-        axis.title.x = element_blank()) +
-  scale_y_continuous(labels = function(x) format(x, scientific = TRUE), limits = c(0,NA), breaks = extended_breaks(n=5)) +
-  facet_wrap(~name, scale="free", ncol=2) -> plot_wn
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size=10)) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 14, whitespace_only = FALSE)) +
+  # facet_wrap(~name, scale="free", ncol=2) +
+  scale_y_continuous(labels = function(x) format(x * 100, scientific = FALSE), 
+                     limits = c(0,0.055), breaks = extended_breaks(n=8)) -> plot_wn
 
 
-print(plot_wn)
-
-ggsave(plot = plot_wn, filename = "../figures/metabolites_WN.tiff", dpi = 300, width = 8, height = 6, bg="white")
-
-
-```
-
-
-### Metabolites more abundant in SD
-
-```{r intensity_metaB_SD}
-
-
-
-identified_metabolites %>% filter(name %in% c("L-Isoleucine", "Acetyl-L-carnitine",
-                                                   "Butyryl-L-carnitine",
-                                                   "Isovaleryl-L-carnitine")) %>%
-  filter(condition %in% c("SD_TF", "WN_TF")) %>%
-  ggplot(aes(y=intensity, x=condition, group=condition)) +
+identified_metabolites %>% 
+  filter(name %in% c("L-Isoleucine", "Acetyl-L-carnitine",
+                     "Butyryl-L-carnitine",
+                     "Isovaleryl-L-carnitine")) %>%
+filter(condition %in% c("SD_TF", "WN_TF")) %>%
+  # ggplot(aes(y=intensity, x=condition, group=condition)) +
+  ggplot(aes(y=intensity, x=name, fill=condition)) +
   geom_boxplot(aes(fill=fill, colour=colour)) +
   scale_fill_identity() +
   scale_color_identity() +
+  ylab(expression("intensity * 10"^" -2")) + 
   theme(strip.text = element_text(face = "bold", size=12),
-        axis.title.x = element_blank()) +
-  scale_y_continuous(labels = function(x) format(x, scientific = TRUE), limits = c(0,NA), breaks = extended_breaks(n=5)) +
-  facet_wrap(~name, scale="free", ncol=2) -> plot_sd
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size=10)) +
+  scale_x_discrete(labels = function(x) str_wrap(x, width = 14, whitespace_only = FALSE)) +
+  # facet_wrap(~name, scale="free", ncol=2) +
+  scale_y_continuous(labels = function(x) format(x * 100, scientific = FALSE), 
+                     limits = c(0,0.055), breaks = extended_breaks(n=8)) -> plot_sd
 
-print(plot_sd)
+plot_all <- ggarrange(plot_wn, plot_sd, 
+                      labels = c("A", "B"), 
+                      common.legend=TRUE,
+                      legend="bottom",
+                      nrow=1,
+                      widths = c(6, 4))
 
-ggsave(plot = plot_sd, filename = "../figures/metabolites_SD.tiff", dpi = 300, width = 8, height = 4, bg="white")
+print(plot_all)
 
-
+ggsave(plot = plot_all, filename = "../figures/Figure_3.tiff", dpi = 300, width = 12, height = 6, bg="white")
 ```
-
 
 ### Session information
 
