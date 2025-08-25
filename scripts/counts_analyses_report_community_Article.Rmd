@@ -1,5 +1,5 @@
 ---
-title: "Statistical analysis report for 'Multi-kingdom microbial community modulates its metabolism under contrasted cloud conditions'."
+title: "Statistical analysis report for 'Multi-kingdom microbial assemblage modulates its metabolism under contrasted cloud conditions'."
 author: "Domitille Jarrige"
 date: '`r Sys.Date()`'
 output:
@@ -169,7 +169,7 @@ compute_deseq2_analysis = function(myData, sample_data, subset_var=FALSE, select
 
 # Experimental setup
 
-Comparison of an artificial microbial community gene expression under two cloud-like conditions: 
+Comparison of an artificial microbial assemblage gene expression under two cloud-like conditions: 
 
  - **summer day (SD):** light, 250µM H2O2, 17°C 
 
@@ -191,11 +191,11 @@ After quality control steps and read cleaning ([report](https://seafile.unistra.
 
 Non ribosomal and ribosomal RNAs were then mapped separately on our reference genomes using STAR.
 
-For non rRNA reads: **\~90-95% of reads mapped in biological samples** ([summary](https://seafile.unistra.fr/f/d4f55d4b60344c64bb4a/). In blank samples, a larger fraction of reads are unmapped.
+For non rRNA reads: **\~90-95% of reads mapped in biological samples**. In blank samples, around 40% of reads were mapped, and only partially.
 
-Few reads are mapped on *P. graminis* PDD-13b-3 genome. It will be difficult to get significant results for this species.
+Few reads were mapped on *P. graminis* PDD-13b-3 genome. It will be difficult to get significant results for this species.
 
-Lastly, for each gene of the community, read counts were obtained with featureCounts.'-M' and '--fraction' options were used to count multi-mapping reads fractionally (if a read maps on x features: each feature gets 1/x counts).
+Lastly, for each gene of the assemblage, read counts were obtained with featureCounts.'-M' and '--fraction' options were used to count multi-mapping reads fractionally (if a read maps on x features: each feature gets 1/x counts).
 
 
 # Analyses
@@ -526,8 +526,8 @@ chem_data %>% ggplot() +
   geom_point(aes(x=sampling_time, y=formaldehyde_ratio_to_initial, color=color)) +
   ylim(c(-0.1, 1.2)) +
   xlim(c(0, 5)) +
-  scale_colour_identity("category", labels = c("community WN", "abiotic WN",
-                                               "abiotic SD", "community SD"), 
+  scale_colour_identity("Category", labels = c("Assemblage Winter Night", "Abiotic Winter Night",
+                                               "Abiotic Summer Day", "Assemblage Summer Day"), 
                         guide="legend") +
   scale_fill_identity() +
   ylab(label = "Relative formaldehyde evolution") +
@@ -535,10 +535,11 @@ chem_data %>% ggplot() +
   facet_grid(rows = vars(condition), cols = vars(experiment),
              labeller = as_labeller(c("metaT" = "Metatranscriptomics", 
                                       "metaB" = "Meta-metabolomics",
-                                      "SD" = "SD",
-                                      "WN" = "WN"))) + 
+                                      "SD" = "Summer Day",
+                                      "WN" = "Winter Night"))) + 
   theme(legend.position = "bottom",
-        panel.background = element_rect(fill="#f4f4f4")) +
+        panel.background = element_rect(fill="#f4f4f4"),
+        strip.text = element_text(size=12)) +
   
   
   geom_path(data = line_data[line_data$category == "biotic_SD",], 
@@ -592,11 +593,11 @@ chem_data %>% ggplot() +
             size = 7, show.legend = FALSE) +
   
   geom_segment(data=segment_data, aes(x = x, xend = xend, y = y, yend = yend)) +
-  geom_text(data=segment_data, aes(x = x + 0.2, y = 0.20, label = "cell sampling"), angle=90, size=3) -> plot
+  geom_text(data=segment_data, aes(x = x + 0.2, y = 0.20, label = "Cell sampling"), angle=90, size=3) -> plot_formaldehyde
 
-print(plot)
+print(plot_formaldehyde)
 
-ggsave(plot = plot, filename = "../figures/formaldehyde_evolution.tiff", dpi = 300, width = 10, height = 6, bg="white")
+# ggsave(plot = plot_formaldehyde, filename = "../figures/formaldehyde_evolution.tiff", dpi = 300, width = 10, height = 6, bg="white")
   
 ```
 
@@ -651,7 +652,7 @@ tmp8$condition <- "SD"
 tmp8$category <- "abiotic_SD"
 tmp8$experiment <- "metaB"
 
-
+chem_data$color <- as.factor(chem_data$color)
 ## Merge data
 
 line_data <- rbind(tmp2, tmp4, tmp6, tmp8)
@@ -741,8 +742,9 @@ chem_data[chem_data$condition == "SD",] %>% ggplot() +
   geom_point(aes(x=sampling_time, y=H2O2_ratio_to_initial, color=color)) +
   ylim(c(-0.1, 1.2)) +
   xlim(c(0, 5)) +
-  scale_colour_identity("category", labels = c("abiotic SD", "community SD"), 
-                        guide="legend") +
+  scale_colour_identity("Category", labels = c("Assemblage Winter Night", "Abiotic Winter Night",
+                                               "Abiotic Summer Day", "Assemblage Summer Day"), 
+                        guide="legend", drop = FALSE) +
   scale_fill_identity() +
 
   ylab("Relative H<sub>2</sub>O<sub>2</sub> evolution") +
@@ -751,11 +753,12 @@ chem_data[chem_data$condition == "SD",] %>% ggplot() +
   facet_grid(rows = vars(condition), cols = vars(experiment),
              labeller = as_labeller(c("metaT" = "Metatranscriptomics", 
                                       "metaB" = "Meta-metabolomics",
-                                      "SD" = "SD",
-                                      "WN" = "WN"))) + 
+                                      "SD" = "Summer Day",
+                                      "WN" = "Winter Night"))) + 
   theme(legend.position = "bottom",
         panel.background = element_rect(fill="#f4f4f4"),
-        axis.title.y = element_markdown()) +
+        axis.title.y = element_markdown(),
+        strip.text = element_text(size=12)) +
   
   
   geom_path(data = line_data[line_data$category == "biotic_SD",], 
@@ -788,18 +791,32 @@ chem_data[chem_data$condition == "SD",] %>% ggplot() +
   # geom_segment(aes(x=4, xend=4, y=-Inf, yend=Inf)) +
   geom_segment(data=segment_data, aes(x = x, xend = xend, y = y, yend = yend)) +
   geom_segment(aes(x = -Inf, xend = Inf, y = 0.2, yend = 0.2), colour = "darkred", linetype = 2) +
-  geom_text(data=segment_data, aes(x = x + 0.2, y = 0.42, label = "cell sampling"), angle=90, size=3) -> plot
+  geom_text(data=segment_data, aes(x = x + 0.2, y = 0.42, label = "Cell sampling"), angle=90, size=3) -> plot_h2o2
 
-print(plot)
+print(plot_h2o2)
 
-ggsave(plot = plot, filename = "../figures/H2O2_evolution.tiff", dpi = 300, width = 10, height = 3.6, bg="white")
+# ggsave(plot = plot_h2o2, filename = "../figures/H2O2_evolution.tiff", dpi = 300, width = 10, height = 3.6, bg="white")
   
 ```
 
 
 
+```{r plot_FigureS1, fig.height=15, fig.dpi=200, fig.width=15}
+plot_chemical <- ggarrange(plot_h2o2, plot_formaldehyde,  
+                      labels = c("A", "B"), 
+                      common.legend=TRUE,
+                      legend="bottom",
+                      nrow=2,
+                      heights = c(1.1, 1.9))
 
-## Descriptive statistics on complete community metatranscriptomics and metabolomics data
+
+ggsave(plot = plot_chemical, filename = "../figures/Figure_S1.tiff", dpi = 300, width = 10, height = 10, bg="white")
+
+# print(plot_chemical)
+```
+
+
+## Descriptive statistics on complete assemblage metatranscriptomics and metabolomics data
 
 ### Metatranscriptomics
 
@@ -909,7 +926,7 @@ sample_stat_filt <- data.frame(
 kable(sample_stat_filt[0:6, ], caption = "Sample-wise statistics after filtering")
 ```
 
-#### CLR (Centered Log ratio) transformation of whole community metatranscriptomics counts
+#### CLR (Centered Log ratio) transformation of whole assemblage metatranscriptomics counts
 
 ```{r CLR_transformation}
 
@@ -977,7 +994,7 @@ hist(unlist(counts_clr),
      main = "Distribution of clr-transformed counts")
 ```
 
-The distribution of the whole community metatranscriptomics counts seems close to normal.
+The distribution of the whole assemblage metatranscriptomics counts seems close to normal.
 
 ```{r box_plot_raw, fig.height=7, fig.width=7}
 # Raw data
@@ -1004,7 +1021,7 @@ boxplot(counts_clr,
 The CLR transformation centred our data.
 
 
-#### Community metatranscriptomics counts repartition by species
+#### Assemblage metatranscriptomics counts repartition by species
 
 ```{r species_repartition_table}
 totals_df$species <- row.names((totals_df))
@@ -1215,7 +1232,7 @@ The CLR transformation centred our data.
 
 
 
-## Exploratory statistical analyses of the whole community
+## Exploratory statistical analyses of the whole assemblage
 
 ### Principal Component Analyses (PCA) metatranscriptomic
 
@@ -1224,7 +1241,7 @@ par(mfrow = c(2,2))
 res_pca <- PCA(t(counts_clr), scale.unit = TRUE, graph = FALSE)
 ```
 
-```{r PERMANOVA_community}
+```{r PERMANOVA_assemblage}
 counts_data <- t(counts_clr)
 metadata_tmp <- data.frame(metadata_table, stringsAsFactors = TRUE)
 permanova <- adonis2(formula = as.formula(paste0("counts_data~", "condition")), 
@@ -1236,7 +1253,7 @@ pv = permanova$`Pr(>F)`[1]
 rm(counts_data, metadata_tmp)
 ```
 
-```{r PCA_2D_plots_community, fig.height=4, fig.width=9}
+```{r PCA_2D_plots_assemblage, fig.height=4, fig.width=9}
 
 pca_tmp <- rbind(res_pca$ind$coord,
                  res_pca$ind.sup$coord) %>% data.frame() %>% 
@@ -1258,7 +1275,7 @@ D3_text = paste0("Dim 3 (",
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.1, y=Dim.2, colour=color, ), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.2, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D1_text) + 
@@ -1271,7 +1288,7 @@ ggplot(pca_data) +
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.1, y=Dim.3, colour=color), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.3, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D1_text) + 
@@ -1283,7 +1300,7 @@ ggplot(pca_data) +
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.2, y=Dim.3, colour=color), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.2, y=Dim.3, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D2_text) + 
@@ -1321,7 +1338,7 @@ rgl::plot3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1],
             zlim = c(min(row_coord[, 3]-10), max(row_coord[, 3])+10),
             col = "darkcyan",
             size=10,
-            main = "PCA community")
+            main = "PCA Assemblage")
 
 rgl::text3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1]+5, 
             y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2]+5, 
@@ -1348,7 +1365,7 @@ rgl::text3d(x=row_coord[c("SD_TF_1", "SD_TF_2", "SD_TF_3"), 1]+5,
 par3d(windowRect = c(20, 30, 800, 800))
 
 # rgl::movie3d(
-#  movie="3dAnimated_PCA_metaT_community",
+#  movie="3dAnimated_PCA_metaT_assemblage",
 #  spin3d( axis = c(0, 0, 1), rpm = 3),
 #  duration = 20,
 #  dir = "../figures",
@@ -1365,7 +1382,7 @@ res_pca_metaB_all_times <- PCA(t(metabolomics_all_times_clr), scale.unit = TRUE,
 ```
 
 
-```{r PERMANOVA_community_metaB_all_times}
+```{r PERMANOVA_assemblage_metaB_all_times}
 
 metabolomics_data <- t(metabolomics_all_times_clr)
 metabolomics_tmp <- data.frame(metadata_table_metaB_all_times, stringsAsFactors = TRUE)
@@ -1378,7 +1395,7 @@ rm(metabolomics_data, metabolomics_tmp)
 ```
 
 
-```{r PCA_2D_plots_community_metabolomics_bis, fig.height=4, fig.width=9}
+```{r PCA_2D_plots_assemblage_metabolomics_bis, fig.height=4, fig.width=9}
 
 pca_tmp_metaB <- rbind(res_pca_metaB_all_times$ind$coord,
                  res_pca_metaB_all_times$ind.sup$coord) %>% data.frame() %>% 
@@ -1400,12 +1417,12 @@ D3_text = paste0("Dim 3 (",
 
 ggplot(pca_data_metaB) +
   geom_point(aes(x=Dim.1, y=Dim.2, colour=color, ), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.2, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D1_text) + 
   ylab(D2_text) +
-  ggtitle("PCA meta-mebolomics") +
+  ggtitle("PCA meta-metabolomics") +
   labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
   theme(panel.background= element_rect(fill="#f4f4f4"),
         plot.caption = element_text(size=7)) -> p1_metaB
@@ -1413,24 +1430,24 @@ ggplot(pca_data_metaB) +
 
 ggplot(pca_data_metaB) +
   geom_point(aes(x=Dim.1, y=Dim.3, colour=color), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.3, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D1_text) + 
   ylab(D3_text) +
-  ggtitle("PCA meta-mebolomics") +
+  ggtitle("PCA meta-metabolomics") +
   labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
   theme(panel.background= element_rect(fill="#f4f4f4"),
         plot.caption = element_text(size=7)) -> p2_metaB
 
 ggplot(pca_data_metaB) +
   geom_point(aes(x=Dim.2, y=Dim.3, colour=color), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.2, y=Dim.3, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D2_text) + 
   ylab(D3_text) +
-  ggtitle("PCA meta-mebolomics") +
+  ggtitle("PCA meta-metabolomics") +
   labs(caption =  paste0("PERMANOVA on condition: p-value: ", pv)) + 
   theme(panel.background= element_rect(fill="#f4f4f4"),
         plot.caption = element_text(size=7)) -> p3_metaB
@@ -1464,7 +1481,7 @@ rgl::plot3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1],
             zlim = c(min(row_coord[, 3]-10), max(row_coord[, 3])+10),
             col = "darkcyan",
             size=10,
-            main = "PCA meta-metabolomics community")
+            main = "PCA meta-metabolomics assemblage")
 
 rgl::text3d(x=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 1]+5, 
             y=row_coord[c("WN_TF_1", "WN_TF_2", "WN_TF_3"), 2]+5, 
@@ -1521,7 +1538,7 @@ rgl::text3d(x=row_coord[c("SD_T0_1", "SD_T0_2", "SD_T0_3"), 1]+5,
 # par3d(windowRect = c(20, 30, 800, 800))
 # 
 # rgl::movie3d(
-#  movie="3dAnimated_PCA_metaB_community",
+#  movie="3dAnimated_PCA_metaB_assemblage",
 #  spin3d( axis = c(0, 0, 1), rpm = 3),
 #  duration = 20,
 #  dir = "../figures",
@@ -1769,7 +1786,7 @@ D3_text = paste0("Dim 3 (",
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.1, y=Dim.2, colour=color, ), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.2, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D1_text) + 
@@ -1782,7 +1799,7 @@ ggplot(pca_data) +
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.1, y=Dim.3, colour=color), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.3, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D1_text) + 
@@ -1794,7 +1811,7 @@ ggplot(pca_data) +
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.2, y=Dim.3, colour=color), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.2, y=Dim.3, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D2_text) + 
@@ -1909,7 +1926,7 @@ D3_text = paste0("Dim 3 (",
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.1, y=Dim.2, colour=color, ), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.2, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D1_text) + 
@@ -1922,7 +1939,7 @@ ggplot(pca_data) +
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.1, y=Dim.3, colour=color), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.3, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D1_text) + 
@@ -1934,7 +1951,7 @@ ggplot(pca_data) +
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.2, y=Dim.3, colour=color), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.2, y=Dim.3, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D2_text) + 
@@ -2047,7 +2064,7 @@ D3_text = paste0("Dim 3 (",
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.1, y=Dim.2, colour=color, ), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.2, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D1_text) + 
@@ -2060,7 +2077,7 @@ ggplot(pca_data) +
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.1, y=Dim.3, colour=color), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.3, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D1_text) + 
@@ -2072,7 +2089,7 @@ ggplot(pca_data) +
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.2, y=Dim.3, colour=color), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.2, y=Dim.3, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D2_text) + 
@@ -2187,7 +2204,7 @@ D3_text = paste0("Dim 3 (",
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.1, y=Dim.2, colour=color, ), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.2, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D1_text) + 
@@ -2200,7 +2217,7 @@ ggplot(pca_data) +
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.1, y=Dim.3, colour=color), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.1, y=Dim.3, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D1_text) + 
@@ -2212,7 +2229,7 @@ ggplot(pca_data) +
 
 ggplot(pca_data) +
   geom_point(aes(x=Dim.2, y=Dim.3, colour=color), size=3) +
-  scale_colour_identity("condition", labels=c("WN", "SD"), guide = "legend") +
+  scale_colour_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ggrepel::geom_text_repel(aes(x=Dim.2, y=Dim.3, colour=color, label=sample), 
                            nudge_y = -2,  seed = 42, segment.size=0.1, show.legend = FALSE) +
   xlab(D2_text) + 
@@ -2643,9 +2660,9 @@ pheatmap(rhoen_clr,
 and samples (Pearson distance)")
 ```
 
-## Differential analyses with MTXmodel (whole community metatranscriptomics data)
+## Differential analyses with MTXmodel (whole assemblage metatranscriptomics data)
 
-MTXmodel was used on the complete community at once. 
+MTXmodel was used on the complete assemblage at once. 
 As input, filtered data (without the undetected genes) but untransformed was given to MTXmodel, as it performs its own CLR normalisation. 
 
 `analysis_method = 'LM'` 
@@ -2882,7 +2899,7 @@ sign_deseq2_df <- res_df
 full_join(all_genes_filtered, annotation_table_fig, by="gene") -> data
 
 
-data$title <- "Differentially expressed genes SD vs WN (DESeq2 & MTXmodel)"
+data$title <- "Differentially expressed genes SD vs WN by strain (DESeq2 & MTXmodel)"
 data$Organism <- factor(data$organism, levels=c("D. hungarica", "P. graminis", "P. syringae", "R. enclensis"))
 
 
@@ -3012,7 +3029,7 @@ print(plot_strains)
 
 ## Venn diagram of RNA differential expression results
 
-```{r venn_diagram_MTX_initial, error=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=9, fig.dpi=100}
+```{r venn_diagram_MTX_initial, error=FALSE, message=FALSE, warning=FALSE, results='hide', fig.height=9, fig.width=9, fig.dpi=100}
 
 
 list_venn <- list(res_deseq_filt[(res_deseq_filt$SAMPLE_COMPARISON == "17_VS_5"), "gene"],
@@ -3032,7 +3049,7 @@ draw.pairwise.venn(area1 = length(list_venn[[1]]),
                  cat.prompts = TRUE,
                  cat.col = c("#D53F7F", "#039EBD"),
                  cat.fontfamily = "Helvetica",
-                 category = c("DESeq  \nalone", "MTXModel  \ncommunity"),
+                 category = c("DESeq  \nalone", "MTXModel  \nassemblage"),
                  title = "Differentially abundant genes found by DESeq2 and MTXmodel",
                  margin = 0.1) -> venn_plot
 
@@ -3044,6 +3061,7 @@ invisible(png(filename = "../figures/Venn_diagram_ALDEXe2_MTX_DESeq_community.pn
 invisible(grid.draw(venn_plot))
 invisible(dev.off())
 ```
+
 
 ```{r merge_differential_analyses_results}
 
@@ -3108,67 +3126,6 @@ identified_metabolites$intensity <- as.numeric(identified_metabolites$intensity)
 ```
 
 
-
-
-```{r intensity_metaB_WN_Figure3_panelA}
-### Metabolites more abundant in WN
-  
-# 
-# identified_metabolites %>% 
-#   filter(name %in% c("2-Aminobenzoic acid", "L-Glutamic acid",
-#                      "DL-Methionine sulfoxide", "N6-Acetyl-L-lysine",
-#                      "D-Pantothenic acid", "Pyridoxal" )) %>%
-# filter(condition %in% c("SD_TF", "WN_TF")) %>%
-#   # ggplot(aes(y=intensity, x=condition, group=condition)) +
-#   ggplot(aes(y=intensity, x=name, fill=condition)) +
-#   geom_boxplot(aes(fill=fill, colour=colour)) +
-#   scale_fill_identity() +
-#   scale_color_identity() +
-#   ylab(expression("intensity * 10"^" -2")) + 
-#   theme(strip.text = element_text(face = "bold", size=12),
-#         axis.title.x = element_blank()) +
-#   # facet_wrap(~name, scale="free", ncol=2) +
-#   scale_y_continuous(labels = function(x) format(x * 100, scientific = FALSE, digits=3), 
-#                      limits = c(0,NA), breaks = extended_breaks(n=5)) -> plot_wn
-
-
-# print(plot_wn)
-# 
-# ggsave(plot = plot_wn, filename = "../figures/metabolites_WN.tiff", dpi = 300, width = 8, height = 6, bg="white")
-
-
-```
-
-
-
-
-```{r intensity_metaB_SD_Figure3_panelB}
-### Metabolites more abundant in SD
-
-# 
-# identified_metabolites %>% filter(name %in% c("L-Isoleucine", "Acetyl-L-carnitine",
-#                                                    "Butyryl-L-carnitine",
-#                                                    "Isovaleryl-L-carnitine")) %>%
-#   filter(condition %in% c("SD_TF", "WN_TF")) %>%
-#   # ggplot(aes(y=intensity, x=condition, group=condition)) +
-#   ggplot(aes(y=intensity, x=name, fill=condition)) +
-#   geom_boxplot(aes(fill=fill, colour=colour)) +
-#   scale_fill_identity() +
-#   scale_color_identity() +
-#   ylab(expression("intensity * 10"^" -2")) + 
-#   theme(strip.text = element_text(face = "bold", size=12),
-#         axis.title.x = element_blank()) +
-#   # facet_wrap(~name, scale="free", ncol=2) +
-#   scale_y_continuous(labels = function(x) format(x * 100, scientific = FALSE, digits=3), 
-#                      limits = c(0,NA), breaks = extended_breaks(n=5)) -> plot_sd
-# 
-# print(plot_sd)
-# 
-# ggsave(plot = plot_sd, filename = "../figures/metabolites_SD.tiff", dpi = 300, width = 8, height = 4, bg="white")
-
-
-```
-
 ### Differentially abundant metabolites between SD and WN
 
 ```{r plot_Figure3, fig.height=7}
@@ -3202,8 +3159,8 @@ filter(condition %in% c("SD_TF", "WN_TF")) %>%
   # ggplot(aes(y=intensity, x=condition, group=condition)) +
   ggplot(aes(y=intensity, x=name, fill=condition)) +
   geom_boxplot(aes(fill=fill, colour=colour)) +
-  scale_fill_identity() +
-  scale_color_identity() +
+  scale_fill_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
+  scale_color_identity("Condition", labels=c("Winter Night", "Summer Day"), guide = "legend") +
   ylab(expression("intensity * 10"^" -2")) + 
   theme(strip.text = element_text(face = "bold", size=12),
         axis.title.x = element_blank(),
